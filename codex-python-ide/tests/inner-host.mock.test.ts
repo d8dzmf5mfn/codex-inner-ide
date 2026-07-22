@@ -1,0 +1,55 @@
+import { describe, expect, it } from "vitest";
+import { createMockInnerHost } from "../src/bridge/inner-host.mock";
+
+describe("development Inner IDE host", () => {
+  it("enforces expectedDigest writes", async () => {
+    const host = createMockInnerHost();
+    const before = await host.files.read("main.py");
+    const after = await host.files.write({
+      relativePath: "main.py",
+      content: `${before.content}\nprint('saved')\n`,
+      expectedDigest: before.digest
+    });
+    expect(after.digest).not.toBe(before.digest);
+
+    await expect(host.files.write({
+      relativePath: "main.py",
+      content: "print('stale')\n",
+      expectedDigest: before.digest
+    })).rejects.toMatchObject({ name: "FileChangedError" });
+  });
+
+  it("runs a Python file through the host contract", async () => {
+    const host = createMockInnerHost();
+    const [interpreter] = await host.python.discover();
+    const events: string[] = [];
+    host.python.subscribe((event) => {
+      if (event.text) events.push(event.text);
+    });
+    const result = await host.python.run("main.py", interpreter.id);
+    expect(result.runId).toBeTruthy();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(events.join("")).toContain("Codex Inner IDE is ready");
+  });
+
+  it("routes Add to chat and More details to separate destinations", async () => {
+    const host = createMockInnerHost();
+    const context = {
+      workspaceId: "mock-workspace",
+      relativePath: "main.py",
+      language: "python" as const,
+      range: { startLine: 1, startColumn: 1, endLine: 1, endColumn: 6 },
+      selectedText: "print",
+      surroundingText: "print('hello')",
+      dirty: false
+    };
+    await expect(host.codex.addToChat(context)).resolves.toMatchObject({
+      destination: "codex",
+      submitted: false
+    });
+    await expect(host.chatgpt.moreDetails(context)).resolves.toMatchObject({
+      destination: "chatgpt",
+      submitted: false
+    });
+  });
+});
