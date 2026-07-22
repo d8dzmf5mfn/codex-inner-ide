@@ -1,5 +1,7 @@
 # Codex Inner IDE
 
+**简体中文** | [English](README_EN.md)
+
 macOS 本地扩展：在 Codex `Files` 下方注入 `IDE` 入口，并由现有菜单栏控制器打开原生 `NSPanel + WKWebView` Monaco Python IDE。它不修改 ChatGPT/Codex App、ASAR 或签名。
 
 > Preview：依赖未公开且可能变化的 Codex Desktop CDP/UI 接口，不是 OpenAI 官方插件，也不隶属于或受 OpenAI 认可。
@@ -14,6 +16,12 @@ macOS 本地扩展：在 Codex `Files` 下方注入 `IDE` 入口，并由现有�
 - Quick Chat 优先使用官方 `⌘⌥N`，失败后使用版本绑定的 UI signal，最后回退到剪贴板。
 
 不包含 Side Chat、Review、交互式 Terminal、Git、LSP、Debugger、Notebook 或 AI 补全。
+
+## 下载
+
+- [Codex Inner IDE v0.2.1 Preview](https://github.com/d8dzmf5mfn/codex-inner-ide/releases/tag/v0.2.1-preview)
+- 当前提供 Apple Silicon、macOS 14+ 构建。
+- 下载 ZIP 和 `.sha256` 文件后，请先核对摘要。
 
 ## 构建与运行
 
