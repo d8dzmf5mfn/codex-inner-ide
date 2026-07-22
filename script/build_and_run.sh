@@ -17,6 +17,8 @@ BUILD_ARCH="$(uname -m)"
 LEGACY_DIST_APP="$DIST_DIR/Codex Pet IDE.app"
 APP_ARCHIVE="$DIST_DIR/$APP_NAME-v$VERSION-macos-$BUILD_ARCH.zip"
 CHECKSUM_FILE="$APP_ARCHIVE.sha256"
+ARCHIVE_FILENAME="${APP_ARCHIVE##*/}"
+CHECKSUM_FILENAME="${CHECKSUM_FILE##*/}"
 LEGACY_APP_ARCHIVE="$DIST_DIR/Codex Pet IDE.zip"
 APP_CONTENTS="$STAGE_APP_BUNDLE/Contents"
 APP_MACOS="$APP_CONTENTS/MacOS"
@@ -73,7 +75,10 @@ codesign --force --sign - --identifier "$BUNDLE_ID" "$STAGE_APP_BUNDLE"
 codesign --verify --deep --strict "$STAGE_APP_BUNDLE"
 mkdir -p "$DIST_DIR"
 /usr/bin/ditto -c -k --keepParent --norsrc "$STAGE_APP_BUNDLE" "$APP_ARCHIVE"
-/usr/bin/shasum -a 256 "$APP_ARCHIVE" > "$CHECKSUM_FILE"
+(
+  cd "$DIST_DIR"
+  /usr/bin/shasum -a 256 "$ARCHIVE_FILENAME" > "$CHECKSUM_FILENAME"
+)
 
 if [[ "$MODE" != "--build-only" && "$MODE" != "build-only" ]]; then
   mkdir -p "$INSTALL_DIR"
