@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Code2, Moon, Pin, PinOff, Play, RotateCcw, Save, Sparkles, Sun, TriangleAlert, X } from "lucide-react";
+import { Code2 } from "lucide-react";
 import { resolveInnerHost } from "./bridge/inner-host";
 import {
   editDocument,
@@ -10,9 +10,11 @@ import {
 } from "./core/documents";
 import { EditorPane } from "./components/EditorPane";
 import { FileTree } from "./components/FileTree";
+import { EditRequestBar, IdeTitleBar, StatusNotice } from "./components/IdeChrome";
 import { OutputPanel } from "./components/OutputPanel";
 import { digestText } from "./core/edits";
-import { currentTimeTheme } from "./core/theme";
+import { usePythonExecution } from "./hooks/usePythonExecution";
+import { useTimeTheme } from "./hooks/useTimeTheme";
 import type {
   ActivePythonEditContext,
   CodexInnerIdeHostV1,
@@ -64,11 +66,6 @@ function PythonIde({ host }: { host: CodexInnerIdeHostV1 }) {
   const [expandedDirectories, setExpandedDirectories] = useState<string[]>([]);
   const [documentViews, setDocumentViews] = useState<Record<string, DocumentViewState>>({});
   const [treeRevision, setTreeRevision] = useState(0);
-  const [running, setRunning] = useState(false);
-  const [runId, setRunId] = useState<string | null>(null);
-  const [exitCode, setExitCode] = useState<number | null>(null);
-  const [output, setOutput] = useState("");
-  const [diagnostics, setDiagnostics] = useState<Diagnostic[]>([]);
   const [revealDiagnostic, setRevealDiagnostic] = useState<Diagnostic | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -78,29 +75,23 @@ function PythonIde({ host }: { host: CodexInnerIdeHostV1 }) {
   const [lastEditRequest, setLastEditRequest] = useState<EditComposer>({ scope: "file", instruction: "" });
   const [proposal, setProposal] = useState<PythonEditProposal | null>(null);
   const [proposalMessage, setProposalMessage] = useState<string | null>(null);
-  const [timeTheme, setTimeTheme] = useState<"light" | "dark">(currentTimeTheme);
   const [pinned, setPinned] = useState(false);
   const documentsRef = useRef(documents);
+  const timeTheme = useTimeTheme();
+  const {
+    running,
+    exitCode,
+    output,
+    diagnostics,
+    run: runPython,
+    stop: stopPython,
+    checkSyntax
+  } = usePythonExecution(host);
 
   useEffect(() => {
     documentsRef.current = documents;
     host.window.setDirty(documents.some((document) => document.dirty));
   }, [documents, host]);
-
-  useEffect(() => {
-    const refresh = () => setTimeTheme(currentTimeTheme());
-    refresh();
-    const timer = window.setInterval(refresh, 60_000);
-    window.addEventListener("focus", refresh);
-    return () => {
-      window.clearInterval(timer);
-      window.removeEventListener("focus", refresh);
-    };
-  }, []);
-
-  useEffect(() => {
-    document.documentElement.dataset.theme = timeTheme;
-  }, [timeTheme]);
 
   useEffect(() => {
     let cancelled = false;
@@ -186,21 +177,6 @@ function PythonIde({ host }: { host: CodexInnerIdeHostV1 }) {
       }
     }).catch(() => undefined);
   }), [host]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => host.python.subscribe((event) => {
-    if (event.kind === "started") {
-      setRunId(event.runId);
-      setRunning(true);
-    } else if (event.kind === "output" && event.text) {
-      setOutput((value) => value + event.text);
-    } else if (event.kind === "exited" || event.kind === "failed") {
-      if (event.text) setOutput((value) => value + `${event.text}\n`);
-      setRunId(null);
-      setRunning(false);
-      setExitCode(event.exitCode ?? -1);
-      if (event.diagnostics) setDiagnostics(event.diagnostics);
-    }
-  }), [host]);
 
   useEffect(() => host.edits.subscribe((event) => {
     const { proposal: next, message: nextMessage } = event;
@@ -303,7 +279,7 @@ function PythonIde({ host }: { host: CodexInnerIdeHostV1 }) {
       setConflict(null);
       setNotice(`Saved ${relativePath}`);
       if (relativePath.endsWith(".py") && selectedInterpreterId) {
-        setDiagnostics(await host.python.checkSyntax(relativePath, selectedInterpreterId));
+        await checkSyntax(relativePath, selectedInterpreterId);
       }
       return true;
     } catch (reason) {
@@ -314,7 +290,7 @@ function PythonIde({ host }: { host: CodexInnerIdeHostV1 }) {
       setError(message(reason, `Unable to save ${relativePath}`));
       return false;
     }
-  }, [host, selectedInterpreterId]);
+  }, [checkSyntax, host, selectedInterpreterId]);
 
   const saveAll = useCallback(async () => {
     for (const document of documentsRef.current.filter((item) => item.dirty)) {
@@ -343,20 +319,9 @@ function PythonIde({ host }: { host: CodexInnerIdeHostV1 }) {
   const runActiveFile = async () => {
     if (!activeDocument?.relativePath.endsWith(".py") || !selectedInterpreterId) return;
     if (!await savePath(activeDocument.relativePath)) return;
-    setRunning(true);
     setBottomPanelOpen(true);
-    setOutput("");
-    setDiagnostics([]);
-    setExitCode(null);
     setError(null);
-    try {
-      const started = await host.python.run(activeDocument.relativePath, selectedInterpreterId);
-      setRunId(started.runId);
-    } catch (reason) {
-      setRunning(false);
-      setExitCode(-1);
-      setOutput(`${message(reason, "Python execution failed")}\n`);
-    }
+    await runPython(activeDocument.relativePath, selectedInterpreterId);
   };
 
   const handoffSelection = async (range: SelectionRange, selectedText: string) => {
@@ -471,111 +436,53 @@ function PythonIde({ host }: { host: CodexInnerIdeHostV1 }) {
 
   return (
     <main className="ide-shell">
-      <header className="titlebar">
-        <div className="titlebar-project">
-          <Code2 size={17} strokeWidth={1.6} aria-hidden="true" />
-          <span>{loaded.workspace.name}</span>
-          <span className="root-label">{loaded.workspace.rootLabel}</span>
-        </div>
-        <div className="titlebar-actions">
-          <span className="time-theme-label" title="Theme follows local time: light 07:00–18:59, dark 19:00–06:59">
-            {timeTheme === "light" ? <Sun size={14} /> : <Moon size={14} />}
-            Auto
-          </span>
-          {loaded.interpreters.length > 0 ? (
-            <select aria-label="Python interpreter" value={selectedInterpreterId} onChange={(event) => setSelectedInterpreterId(event.target.value)}>
-              {loaded.interpreters.map((interpreter) => (
-                <option key={interpreter.id} value={interpreter.id}>{interpreter.version} · {interpreter.executable}</option>
-              ))}
-            </select>
-          ) : (
-            <button type="button" onClick={() => void host.python.createVenv().then((interpreter) => {
-              setLoaded((current) => current ? { ...current, interpreters: [interpreter] } : current);
-              setSelectedInterpreterId(interpreter.id);
-            }).catch((reason) => setError(message(reason, "Unable to create .venv")))}>Create .venv</button>
-          )}
-          <button type="button" onClick={() => activePath && void savePath(activePath)} disabled={!activeDocument?.dirty}>
-            <Save size={15} strokeWidth={1.7} aria-hidden="true" /> Save
-          </button>
-          <button
-            type="button"
-            onClick={() => openEditComposer("file")}
-            disabled={!activeDocument?.relativePath.endsWith(".py") || activeDocument.readonly}
-          >
-            <Sparkles size={15} strokeWidth={1.7} aria-hidden="true" /> Edit current file
-          </button>
-          <button className="run-button" type="button" onClick={() => void runActiveFile()} disabled={running || !activeDocument?.relativePath.endsWith(".py") || !selectedInterpreterId}>
-            <Play size={15} strokeWidth={1.8} fill="currentColor" aria-hidden="true" />
-            {running ? "Running…" : "Run Python"}
-          </button>
-          <button
-            type="button"
-            className={pinned ? "pin-button pin-button-active" : "pin-button"}
-            aria-label={pinned ? "Unpin IDE window" : "Pin IDE window on top"}
-            aria-pressed={pinned}
-            title={pinned ? "Unpin window" : "Keep window on top"}
-            onClick={() => {
-              const next = !pinned;
-              setPinned(next);
-              host.window.setPinned(next);
-            }}
-          >
-            {pinned ? <PinOff size={15} aria-hidden="true" /> : <Pin size={15} aria-hidden="true" />}
-          </button>
-          <button type="button" aria-label="Close IDE" onClick={() => void host.window.closeIde()}><X size={15} /></button>
-        </div>
-      </header>
+      <IdeTitleBar
+        workspace={loaded.workspace}
+        theme={timeTheme}
+        interpreters={loaded.interpreters}
+        selectedInterpreterId={selectedInterpreterId}
+        activeDocument={activeDocument}
+        running={running}
+        pinned={pinned}
+        onSelectInterpreter={setSelectedInterpreterId}
+        onCreateVenv={() => void host.python.createVenv().then((interpreter) => {
+          setLoaded((current) => current ? { ...current, interpreters: [interpreter] } : current);
+          setSelectedInterpreterId(interpreter.id);
+        }).catch((reason) => setError(message(reason, "Unable to create .venv")))}
+        onSave={() => { if (activePath) void savePath(activePath); }}
+        onEditCurrentFile={() => openEditComposer("file")}
+        onRun={() => void runActiveFile()}
+        onTogglePin={() => {
+          const next = !pinned;
+          setPinned(next);
+          host.window.setPinned(next);
+        }}
+        onClose={() => void host.window.closeIde()}
+      />
 
       {editComposer && (
-        <form
-          className="edit-request-bar"
-          onSubmit={(event) => {
-            event.preventDefault();
-            void submitEditRequest();
-          }}
-        >
-          <Sparkles size={16} aria-hidden="true" />
-          <label htmlFor="codex-edit-instruction">
-            {editComposer.scope === "selection" ? "Edit selected Python" : "Edit current Python file"}
-          </label>
-          <textarea
-            id="codex-edit-instruction"
-            autoFocus
-            value={editComposer.instruction}
-            placeholder="Describe the change. Press ⌘Enter to generate a read-only proposal."
-            onChange={(event) => setEditComposer((current) => current ? { ...current, instruction: event.target.value } : current)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && event.metaKey) {
-                event.preventDefault();
-                void submitEditRequest();
-              }
-              if (event.key === "Escape") setEditComposer(null);
-            }}
-          />
-          <button type="submit">Generate proposal</button>
-          <button type="button" onClick={() => setEditComposer(null)}>Cancel</button>
-        </form>
+        <EditRequestBar
+          scope={editComposer.scope}
+          instruction={editComposer.instruction}
+          onInstructionChange={(instruction) => setEditComposer((current) => current ? { ...current, instruction } : current)}
+          onSubmit={() => void submitEditRequest()}
+          onCancel={() => setEditComposer(null)}
+        />
       )}
 
-      {(error || notice || conflict) && (
-        <div className={`notice-bar${error || conflict ? " notice-error" : ""}`} role="status">
-          {conflict ? (
-            <>
-              <TriangleAlert size={15} aria-hidden="true" />
-              <span>{conflict.relativePath} changed on disk.</span>
-              <button type="button" onClick={() => {
-                setDocuments((items) => items.map((item) => item.relativePath === conflict.relativePath ? openDocument(conflict.disk) : item));
-                setConflict(null);
-              }}><RotateCcw size={13} /> Reload</button>
-              <button type="button" onClick={() => void savePath(conflict.relativePath, conflict.disk.digest)}>Keep Editor Version</button>
-              <button type="button" onClick={() => setConflict(null)}>Cancel</button>
-            </>
-          ) : <>
-            <span>{error ?? notice}</span>
-            <button type="button" onClick={() => { setError(null); setNotice(null); }}>Dismiss</button>
-          </>}
-        </div>
-      )}
+      <StatusNotice
+        error={error}
+        notice={notice}
+        conflict={conflict}
+        onReloadConflict={() => {
+          if (!conflict) return;
+          setDocuments((items) => items.map((item) => item.relativePath === conflict.relativePath ? openDocument(conflict.disk) : item));
+          setConflict(null);
+        }}
+        onKeepEditorVersion={() => { if (conflict) void savePath(conflict.relativePath, conflict.disk.digest); }}
+        onCancelConflict={() => setConflict(null)}
+        onDismiss={() => { setError(null); setNotice(null); }}
+      />
 
       <div className="workspace-grid">
         <FileTree
@@ -642,7 +549,7 @@ function PythonIde({ host }: { host: CodexInnerIdeHostV1 }) {
             output={output}
             diagnostics={diagnostics}
             onToggle={() => setBottomPanelOpen((open) => !open)}
-            onStop={() => runId && void host.python.terminate(runId)}
+            onStop={stopPython}
             onOpenDiagnostic={(diagnostic) => {
               void openFile(diagnostic.relativePath).then(() => setRevealDiagnostic({ ...diagnostic }));
             }}

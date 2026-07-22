@@ -5,7 +5,9 @@ import Foundation
 @MainActor
 final class ControllerCoordinator: IDEWindowControllerDelegate {
     private let launcher = CodexLauncher()
+    private let workspaceStateStore = WorkspaceStateStore()
     private let sessionToken = UUID().uuidString.lowercased()
+    private lazy var quickChatHandoffController = QuickChatHandoffController(launcher: launcher)
     private var installation: CodexInstallation?
     private var compatibilityProfile: CompatibilityProfile?
     private var port: Int?
@@ -27,16 +29,6 @@ final class ControllerCoordinator: IDEWindowControllerDelegate {
     private var activeTaskKey = ""
     private var boundTaskKey = ""
     private var recentIDEChanges: [String: Date] = [:]
-
-    private var applicationSupportURL: URL {
-        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("CodexInnerIDE", isDirectory: true)
-    }
-
-    private var legacyApplicationSupportURL: URL {
-        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("CodexPetIDE", isDirectory: true)
-    }
 
     func startLocalBridge() {
         guard localBridgeServer == nil else { return }
@@ -547,9 +539,9 @@ final class ControllerCoordinator: IDEWindowControllerDelegate {
             ideWindowController?.setPinned(request.params["pinned"]?.boolValue == true)
             return .object([:])
         case "window.loadState":
-            return try loadState(workspaceID: workspace.binding.id)
+            return try workspaceStateStore.loadWindowState(workspaceID: workspace.binding.id)
         case "window.saveState":
-            try saveState(request.params, workspaceID: workspace.binding.id)
+            try workspaceStateStore.saveWindowState(request.params, workspaceID: workspace.binding.id)
             return .object([:])
         case "window.closeIde":
             Task { [weak self] in
@@ -565,21 +557,15 @@ final class ControllerCoordinator: IDEWindowControllerDelegate {
         guard await ensureChatHandoffConnection(),
               compatibilityProfile != nil,
               let mainSession
-        else { return copyToClipboard(prompt, destination: .chatgpt) }
-
-        activateCodex()
-        _ = try? await mainSession.send(method: "Page.bringToFront")
-        if await dispatchQuickChatShortcut(mainSession),
-           await fillQuickChatComposer(prompt, timeout: 5) {
-            return HandoffResult(destination: .chatgpt, mechanism: .quickChatShortcut)
+        else {
+            return quickChatHandoffController.copyToClipboard(prompt, destination: .chatgpt)
         }
-
-        let signal = try? await mainSession.evaluate(InjectionScripts.activateQuickChatSignal())
-        if signal?["ok"]?.boolValue == true,
-           await fillQuickChatComposer(prompt, timeout: 5) {
-            return HandoffResult(destination: .chatgpt, mechanism: .compatibilitySignal)
-        }
-        return copyToClipboard(prompt, destination: .chatgpt)
+        return await quickChatHandoffController.handoff(
+            prompt: prompt,
+            mainSession: mainSession,
+            port: port,
+            mainTargetID: mainTargetID
+        )
     }
 
     private func ensureChatHandoffConnection() async -> Bool {
@@ -611,87 +597,6 @@ final class ControllerCoordinator: IDEWindowControllerDelegate {
         compatibilityProfile = nil
     }
 
-    private func dispatchQuickChatShortcut(_ session: CDPSession) async -> Bool {
-        do {
-            let common: [String: JSONValue] = [
-                "modifiers": .number(5),
-                "key": .string("n"),
-                "code": .string("KeyN"),
-                "windowsVirtualKeyCode": .number(78),
-                "nativeVirtualKeyCode": .number(45)
-            ]
-            _ = try await session.send(
-                method: "Input.dispatchKeyEvent",
-                params: common.merging(["type": .string("rawKeyDown")]) { _, new in new }
-            )
-            _ = try await session.send(
-                method: "Input.dispatchKeyEvent",
-                params: common.merging(["type": .string("keyUp")]) { _, new in new }
-            )
-            return true
-        } catch {
-            return false
-        }
-    }
-
-    private func fillQuickChatComposer(_ prompt: String, timeout: TimeInterval) async -> Bool {
-        guard let mainSession else { return false }
-        let deadline = Date().addingTimeInterval(timeout)
-        var candidateSessions: [String: CDPSession] = [:]
-
-        while Date() < deadline {
-            if let result = try? await mainSession.evaluate(
-                InjectionScripts.quickChatComposerHandoff(prompt: prompt)
-            ), result["ok"]?.boolValue == true {
-                await closeCandidateSessions(candidateSessions)
-                return true
-            }
-
-            if let port,
-               let targets = try? await CDPTargetDiscovery.listTargets(port: port) {
-                for target in targets where target.id != mainTargetID && candidateSessions[target.id] == nil {
-                    guard let session = try? CDPSession(target: target, port: port) else { continue }
-                    do {
-                        try await session.connect()
-                        candidateSessions[target.id] = session
-                    } catch {
-                        await session.close()
-                    }
-                }
-                for session in candidateSessions.values {
-                    if let result = try? await session.evaluate(
-                        InjectionScripts.quickChatComposerHandoff(prompt: prompt)
-                    ), result["ok"]?.boolValue == true {
-                        await closeCandidateSessions(candidateSessions)
-                        return true
-                    }
-                }
-            }
-            try? await Task.sleep(for: .milliseconds(200))
-        }
-
-        await closeCandidateSessions(candidateSessions)
-        return false
-    }
-
-    private func closeCandidateSessions(_ sessions: [String: CDPSession]) async {
-        for session in sessions.values { await session.close() }
-    }
-
-    private func copyToClipboard(
-        _ prompt: String,
-        destination: HandoffDestination
-    ) -> HandoffResult {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(prompt, forType: .string)
-        return HandoffResult(destination: destination, mechanism: .clipboard)
-    }
-
-    private func activateCodex() {
-        let application = launcher.launchedApplication ?? launcher.runningApplications.first
-        application?.activate(options: [])
-    }
-
     private func relativePath(_ params: JSONValue) throws -> String {
         guard let path = params["relativePath"]?.stringValue else {
             throw InnerIDEError.invalidRelativePath("")
@@ -700,14 +605,15 @@ final class ControllerCoordinator: IDEWindowControllerDelegate {
     }
 
     private func resolveWorkspace(taskKey: String) async throws {
-        if let cached = cachedWorkspace(for: taskKey), isDirectory(cached) {
+        if let cached = workspaceStateStore.cachedWorkspace(for: taskKey),
+           workspaceStateStore.isDirectory(cached) {
             try bindWorkspace(cached, taskKey: taskKey)
             return
         }
         if taskKey.isEmpty,
-           let path = UserDefaults.standard.string(forKey: "lastWorkspace"),
-           isDirectory(URL(fileURLWithPath: path)) {
-            try bindWorkspace(URL(fileURLWithPath: path), taskKey: taskKey)
+           let last = workspaceStateStore.lastWorkspace(),
+           workspaceStateStore.isDirectory(last) {
+            try bindWorkspace(last, taskKey: taskKey)
             return
         }
 
@@ -716,7 +622,7 @@ final class ControllerCoordinator: IDEWindowControllerDelegate {
            let candidates = result["candidates"]?.arrayValue?.compactMap(\.stringValue) {
             for path in candidates {
                 let url = URL(fileURLWithPath: path)
-                guard isDirectory(url) else { continue }
+                guard workspaceStateStore.isDirectory(url) else { continue }
                 let alert = NSAlert()
                 alert.messageText = "Use this workspace?"
                 alert.informativeText = path
@@ -743,27 +649,7 @@ final class ControllerCoordinator: IDEWindowControllerDelegate {
 
     private func bindWorkspace(_ url: URL, taskKey: String) throws {
         workspace = try WorkspaceService(rootURL: url)
-        UserDefaults.standard.set(url.path, forKey: "lastWorkspace")
-        if !taskKey.isEmpty {
-            UserDefaults.standard.set(
-                url.path,
-                forKey: "workspace.\(WorkspaceService.sha256(Data(taskKey.utf8)))"
-            )
-        }
-    }
-
-    private func cachedWorkspace(for taskKey: String) -> URL? {
-        guard !taskKey.isEmpty,
-              let path = UserDefaults.standard.string(
-                forKey: "workspace.\(WorkspaceService.sha256(Data(taskKey.utf8)))"
-              )
-        else { return nil }
-        return URL(fileURLWithPath: path)
-    }
-
-    private func isDirectory(_ url: URL) -> Bool {
-        var value: ObjCBool = false
-        return FileManager.default.fileExists(atPath: url.path, isDirectory: &value) && value.boolValue
+        workspaceStateStore.recordWorkspace(url, taskKey: taskKey)
     }
 
     private func waitForMainRendererShell(
@@ -818,30 +704,6 @@ final class ControllerCoordinator: IDEWindowControllerDelegate {
         alert.addButton(withTitle: "Create .venv")
         alert.addButton(withTitle: "Cancel")
         return alert.runModal() == .alertFirstButtonReturn
-    }
-
-    private func stateURL(workspaceID: String, legacy: Bool = false) -> URL {
-        (legacy ? legacyApplicationSupportURL : applicationSupportURL)
-            .appendingPathComponent("state-\(workspaceID).json")
-    }
-
-    private func loadState(workspaceID: String) throws -> JSONValue {
-        let current = stateURL(workspaceID: workspaceID)
-        let legacy = stateURL(workspaceID: workspaceID, legacy: true)
-        let url = FileManager.default.fileExists(atPath: current.path) ? current : legacy
-        guard FileManager.default.fileExists(atPath: url.path) else { return .null }
-        return try JSONDecoder().decode(JSONValue.self, from: Data(contentsOf: url))
-    }
-
-    private func saveState(_ state: JSONValue, workspaceID: String) throws {
-        try FileManager.default.createDirectory(
-            at: applicationSupportURL,
-            withIntermediateDirectories: true
-        )
-        try JSONEncoder().encode(state).write(
-            to: stateURL(workspaceID: workspaceID),
-            options: [.atomic]
-        )
     }
 
     private func present(_ error: Error) {
