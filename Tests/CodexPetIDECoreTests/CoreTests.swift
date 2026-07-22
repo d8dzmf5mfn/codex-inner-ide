@@ -14,7 +14,7 @@ final class CompatibilityProfileTests: XCTestCase {
 
     func testCurrentProfileUsesDesktopRendererProfile() {
         let profile = CompatibilityProfile.match(
-            appVersion: "26.715.72028",
+            appVersion: "26.715.72359",
             codexCLIVersion: "codex-cli 0.145.0-alpha.30"
         )
 
@@ -22,6 +22,15 @@ final class CompatibilityProfileTests: XCTestCase {
     }
 
     func testPreviousProfileRemainsSupported() {
+        let profile = CompatibilityProfile.match(
+            appVersion: "26.715.72028",
+            codexCLIVersion: "codex-cli 0.145.0-alpha.30"
+        )
+
+        XCTAssertEqual(profile?.appVersion, "26.715.72028")
+    }
+
+    func testLegacyProfileRemainsSupported() {
         let profile = CompatibilityProfile.match(
             appVersion: "26.715.71837",
             codexCLIVersion: "codex-cli 0.145.0-alpha.30"

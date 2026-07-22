@@ -30,8 +30,8 @@ macOS 本地扩展：在 Codex `Files` 下方注入 `IDE` 入口，并由现有�
 输出：
 
 - 安装并启动：`~/Applications/Codex Inner IDE.app`
-- 分发包：`dist/Codex Inner IDE-v0.2.0-macos-arm64.zip`
-- 校验文件：`dist/Codex Inner IDE-v0.2.0-macos-arm64.zip.sha256`
+- 分发包：`dist/Codex Inner IDE-v0.2.1-macos-arm64.zip`
+- 校验文件：`dist/Codex Inner IDE-v0.2.1-macos-arm64.zip.sha256`
 
 只生成分发包、不替换当前安装：
 
@@ -65,11 +65,12 @@ Swift 集成测试调用 `/Applications/ChatGPT.app/Contents/Resources/codex app
 - Codex Desktop `26.715.70719` + `codex-cli 0.145.0-alpha.27`
 - Codex Desktop `26.715.71837` + `codex-cli 0.145.0-alpha.30`
 - Codex Desktop `26.715.72028` + `codex-cli 0.145.0-alpha.30`
+- Codex Desktop `26.715.72359` + `codex-cli 0.145.0-alpha.30`
 
 未知版本仍允许从菜单栏打开 IDE，但默认禁用 Sidepanel 和聊天交接。CDP selector、Quick Chat UI 和 experimental App Server 都不是公开稳定的 Desktop API。
 
 ## 分发状态
 
-- `v0.2.0` 是 Apple Silicon preview，不是已公证的正式版本。
+- `v0.2.1` 是 Apple Silicon preview，不是已公证的正式版本。
 - 当前机器没有可用的 Apple Developer ID；Release ZIP 会保留 ad-hoc 签名。
 - 第三方组件及许可证见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。

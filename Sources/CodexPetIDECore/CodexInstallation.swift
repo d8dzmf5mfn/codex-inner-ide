@@ -28,6 +28,10 @@ public struct CompatibilityProfile: Codable, Equatable, Sendable {
         CompatibilityProfile(
             appVersion: "26.715.72028",
             codexCLIVersionPrefix: "codex-cli 0.145.0-alpha.30"
+        ),
+        CompatibilityProfile(
+            appVersion: "26.715.72359",
+            codexCLIVersionPrefix: "codex-cli 0.145.0-alpha.30"
         )
     ]
 
