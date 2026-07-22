@@ -32,7 +32,7 @@ describe("development Inner IDE host", () => {
     expect(events.join("")).toContain("Codex Inner IDE is ready");
   });
 
-  it("routes Add to chat and More details to separate destinations", async () => {
+  it("routes More details to ChatGPT without submitting", async () => {
     const host = createMockInnerHost();
     const context = {
       workspaceId: "mock-workspace",
@@ -43,14 +43,22 @@ describe("development Inner IDE host", () => {
       surroundingText: "print('hello')",
       dirty: false
     };
-    await expect(host.codex.addToChat(context)).resolves.toMatchObject({
-      destination: "codex",
-      submitted: false
-    });
     await expect(host.chatgpt.moreDetails(context)).resolves.toMatchObject({
       destination: "chatgpt",
       submitted: false
     });
+  });
+
+  it("persists the per-workspace pin state", async () => {
+    const host = createMockInnerHost();
+    await host.window.saveState({
+      openPaths: ["main.py"],
+      activePath: "main.py",
+      bottomPanelOpen: true,
+      expandedDirectories: [],
+      pinned: true
+    });
+    await expect(host.window.loadState()).resolves.toMatchObject({ pinned: true });
   });
 
   it("emits a read-only Python proposal without writing the mock file", async () => {

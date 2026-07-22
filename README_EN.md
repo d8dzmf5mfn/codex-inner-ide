@@ -8,11 +8,11 @@ A local macOS extension that injects an `IDE` entry below `Files` in Codex and o
 
 ## Features
 
-- Resizable native IDE window, centered on first launch with per-workspace frame restoration.
+- Resizable native IDE window, centered on first launch with per-workspace frame restoration; Pin keeps it above other windows like Pet.
 - Monaco editor, file tree, multiple tabs, versioned atomic saves, and external-change conflict handling.
 - Python interpreter discovery, `.venv` creation, Run/Stop, Output, and Problems.
 - Python execution through the bundled Codex `command/exec` with `workspaceWrite`, a single writable root, and network access disabled.
-- `Add to chat` fills the bound Codex task composer; `More details` fills ChatGPT Quick Chat. Neither action sends automatically.
+- `More details` fills ChatGPT Quick Chat without sending automatically.
 - Quick Chat first uses the official `⌘⌥N` shortcut, then a version-bound UI signal, and finally a clipboard fallback.
 - The `Codex Inner Edit` plugin generates an isolated read-only proposal for the active Python selection or file. `Enter` changes only the Monaco buffer, `Esc` rejects it, and `⌘S` writes it to disk.
 - The IDE follows local time automatically: light from 07:00–18:59 and dark from 19:00–06:59, including Monaco, the file tree, diffs, and Problems.

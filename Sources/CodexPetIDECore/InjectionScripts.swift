@@ -88,30 +88,8 @@ public enum InjectionScripts {
         """
     }
 
-    public static func navigateToTask(_ taskKey: String) -> String {
-        let task = javaScriptLiteral(taskKey)
-        return """
-        (() => {
-          const raw = \(task);
-          if (!raw) return { ok: true, navigated: false };
-          let target;
-          try { target = new URL(raw); } catch { return { ok: false, reason: 'invalid_task_url' }; }
-          if (target.protocol !== 'app:' || target.host !== location.host) {
-            return { ok: false, reason: 'rejected_task_url' };
-          }
-          if (target.href === location.href) return { ok: true, navigated: false };
-          location.assign(target.href);
-          return { ok: true, navigated: true };
-        })()
-        """
-    }
-
-    public static func composerHandoff(prompt: String) -> String {
-        composerInsertion(prompt: prompt, requireQuickChat: false)
-    }
-
     public static func quickChatComposerHandoff(prompt: String) -> String {
-        composerInsertion(prompt: prompt, requireQuickChat: true)
+        composerInsertion(prompt: prompt)
     }
 
     public static func quickChatStatus() -> String {
@@ -260,9 +238,6 @@ public enum InjectionScripts {
               terminate: (runId) => call('python.terminate', { runId }),
               subscribe: (listener) => subscribe('python.event', listener)
             },
-            codex: {
-              addToChat: (context) => call('codex.addToChat', context)
-            },
             chatgpt: {
               moreDetails: (context) => call('chatgpt.moreDetails', context)
             },
@@ -280,6 +255,7 @@ public enum InjectionScripts {
             },
             window: {
               setDirty: (dirty) => { void call('window.setDirty', { dirty }); },
+              setPinned: (pinned) => { void call('window.setPinned', { pinned }); },
               loadState: () => call('window.loadState'),
               saveState: (state) => call('window.saveState', state),
               closeIde: () => call('window.closeIde')
@@ -295,52 +271,60 @@ public enum InjectionScripts {
         return data.flatMap { String(data: $0, encoding: .utf8) } ?? "\"\""
     }
 
-    private static func composerInsertion(prompt: String, requireQuickChat: Bool) -> String {
+    private static func composerInsertion(prompt: String) -> String {
         let promptLiteral = javaScriptLiteral(prompt)
-        let quickChatRequirement = requireQuickChat ? "true" : "false"
         return """
         (() => {
           const prompt = \(promptLiteral);
-          const requireQuickChat = \(quickChatRequirement);
           const visible = (element) => !!element && element.getClientRects().length > 0
             && getComputedStyle(element).visibility !== 'hidden';
-          let composer = null;
-          if (requireQuickChat) {
-            const routeMatch = /(?:quick[-_/ ]?chat|chatgpt)/i.test(location.pathname + location.search + location.hash);
-            const quickChatCandidates = [...document.querySelectorAll(
-              'form[data-thread-find-composer="true"] .composer-surface-chrome [contenteditable="true"][aria-label="Message ChatGPT"]'
-            )].filter((element) => visible(element) && !element.hasAttribute('data-codex-composer'));
-            const focused = document.activeElement;
-            composer = quickChatCandidates.includes(focused)
-              ? focused
+          const routeMatch = /(?:quick[-_/ ]?chat|chatgpt)/i.test(location.pathname + location.search + location.hash);
+          const selectors = [
+            'form[data-thread-find-composer="true"] [contenteditable="true"]',
+            '[data-thread-find-composer="true"] [contenteditable="true"]',
+            'form[data-thread-find-composer="true"] textarea',
+            '.composer-surface-chrome [contenteditable="true"]',
+            '[role="textbox"][contenteditable="true"]',
+            'textarea'
+          ];
+          const quickChatCandidates = [...new Set(selectors.flatMap((selector) => [...document.querySelectorAll(selector)]))]
+            .filter((element) => visible(element)
+              && !element.hasAttribute('data-codex-composer')
+              && !element.closest('[data-codex-composer="true"]'));
+          const focused = document.activeElement?.closest?.('[contenteditable="true"],textarea') || document.activeElement;
+          const scoped = quickChatCandidates.filter((element) => element.closest('[data-thread-find-composer="true"]'));
+          const composer = quickChatCandidates.includes(focused)
+            ? focused
+            : routeMatch && scoped.length === 1
+              ? scoped[0]
               : routeMatch && quickChatCandidates.length === 1
                 ? quickChatCandidates[0]
                 : null;
-            if (!composer) return { ok: false, reason: 'quick_chat_composer_not_focused' };
-          } else {
-            composer = document.querySelector('.composer-surface-chrome [contenteditable="true"][data-codex-composer="true"]')
-              || document.querySelector('[data-testid*="composer"] [contenteditable="true"]')
-              || document.querySelector('[role="textbox"][contenteditable="true"]')
-              || document.querySelector('textarea');
-          }
+          if (!composer) return {
+            ok: false,
+            reason: routeMatch ? 'quick_chat_composer_ambiguous' : 'quick_chat_route_not_matched',
+            candidates: quickChatCandidates.length,
+            scopedCandidates: scoped.length
+          };
           if (!composer || !visible(composer)) return { ok: false, reason: 'composer_not_found' };
           const existing = composer instanceof HTMLTextAreaElement ? composer.value : (composer.innerText || '');
-          const requestLabel = requireQuickChat ? 'My request for ChatGPT' : 'My request for Codex';
-          const value = existing.trim() ? `${prompt}\n\n## ${requestLabel}:\n${existing}` : prompt;
+          const value = existing.trim() ? `${prompt}\n\n## My request for ChatGPT:\n${existing}` : prompt;
           composer.focus();
           if (composer instanceof HTMLTextAreaElement) {
             const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
             setter?.call(composer, value);
+            composer.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: value }));
           } else {
             const selection = getSelection();
             const range = document.createRange();
             range.selectNodeContents(composer);
             selection?.removeAllRanges();
             selection?.addRange(range);
-            if (!document.execCommand('insertText', false, value)) composer.textContent = value;
+            if (!document.execCommand('insertText', false, value)) {
+              composer.textContent = value;
+              composer.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: value }));
+            }
           }
-          composer.dispatchEvent(new InputEvent('beforeinput', { bubbles: true, inputType: 'insertText', data: value }));
-          composer.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: value }));
           return { ok: true };
         })()
         """

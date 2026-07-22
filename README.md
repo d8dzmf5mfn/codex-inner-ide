@@ -8,11 +8,11 @@ macOS 本地扩展：在 Codex `Files` 下方注入 `IDE` 入口，并由现有�
 
 ## 功能
 
-- 可调整大小的原生 IDE 窗口；首次居中，之后按 workspace 恢复位置。
+- 可调整大小的原生 IDE 窗口；首次居中，之后按 workspace 恢复位置；Pin 可让窗口像 Pet 一样保持置顶。
 - Monaco、文件树、多标签、版本化原子保存和外部修改冲突处理。
 - Python 解释器发现、`.venv`、Run/Stop、Output 和 Problems。
 - Python 通过 bundled Codex `command/exec` 运行，固定 `workspaceWrite`、唯一 writable root、禁网。
-- `Add to chat` 预填绑定的 Codex task；`More details` 预填 ChatGPT Quick Chat；两者都不会自动发送。
+- `More details` 预填 ChatGPT Quick Chat，但不会自动发送。
 - Quick Chat 优先使用官方 `⌘⌥N`，失败后使用版本绑定的 UI signal，最后回退到剪贴板。
 - `Codex Inner Edit` 插件可为当前 Python 选区或文件生成独立只读修改提案；`Enter` 只应用到 Monaco 缓冲区，`Esc` 拒绝，`⌘S` 才写入磁盘。
 - IDE 按本地时间自动变色：07:00–18:59 浅色，19:00–06:59 深色，Monaco、文件树、Diff 和 Problems 同步切换。

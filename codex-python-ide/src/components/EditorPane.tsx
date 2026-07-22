@@ -27,7 +27,6 @@ type EditorPaneProps = {
   onViewStateChange: (relativePath: string, state: DocumentViewState) => void;
   revealDiagnostic: Diagnostic | null;
   theme: "light" | "dark";
-  onAddToChat: (range: SelectionRange, selectedText: string) => void;
   onMoreDetails: (range: SelectionRange, selectedText: string) => void;
   onEditSelection: (range: SelectionRange, selectedText: string) => void;
   onSelectionChange: (selection: { range: SelectionRange; selectedText: string } | null) => void;
@@ -50,7 +49,6 @@ export function EditorPane({
   onViewStateChange,
   revealDiagnostic,
   theme,
-  onAddToChat,
   onMoreDetails,
   onEditSelection,
   onSelectionChange,
@@ -354,13 +352,6 @@ export function EditorPane({
               onClick={() => onEditSelection(selectionMenu.range, selectionMenu.selectedText)}
             >
               Edit with Codex
-            </button>
-            <button
-              className="selection-trigger"
-              type="button"
-              onClick={() => onAddToChat(selectionMenu.range, selectionMenu.selectedText)}
-            >
-              Add to chat
             </button>
             <button
               className="selection-trigger"

@@ -75,10 +75,10 @@ function directEntries(files: Map<string, string>, directories: Set<string>, dir
     : left.kind === "directory" ? -1 : 1);
 }
 
-function handoff(destination: "codex" | "chatgpt"): HandoffResult {
+function handoff(): HandoffResult {
   return {
-    destination,
-    mechanism: destination === "codex" ? "composer" : "quickChatShortcut",
+    destination: "chatgpt",
+    mechanism: "quickChatShortcut",
     submitted: false
   };
 }
@@ -206,11 +206,8 @@ export function createMockInnerHost(): CodexInnerIdeHostV1 {
         return () => pythonListeners.delete(listener);
       }
     },
-    codex: {
-      async addToChat() { return handoff("codex"); }
-    },
     chatgpt: {
-      async moreDetails() { return handoff("chatgpt"); }
+      async moreDetails() { return handoff(); }
     },
     edits: {
       async request(request) {
@@ -254,6 +251,7 @@ export function createMockInnerHost(): CodexInnerIdeHostV1 {
     },
     window: {
       setDirty() {},
+      setPinned() {},
       async loadState() { return state; },
       async saveState(nextState) { state = structuredClone(nextState); },
       async closeIde() {}

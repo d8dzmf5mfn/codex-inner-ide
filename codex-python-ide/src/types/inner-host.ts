@@ -111,8 +111,8 @@ export type IdeSelectionContext = {
 };
 
 export type HandoffResult = {
-  destination: "codex" | "chatgpt";
-  mechanism: "composer" | "quickChatShortcut" | "compatibilitySignal" | "clipboard";
+  destination: "chatgpt";
+  mechanism: "quickChatShortcut" | "compatibilitySignal" | "clipboard";
   submitted: false;
 };
 
@@ -129,6 +129,7 @@ export type IdeWindowState = {
   bottomPanelOpen: boolean;
   expandedDirectories: string[];
   documentViews?: Record<string, DocumentViewState>;
+  pinned?: boolean;
 };
 
 export type Unsubscribe = () => void;
@@ -156,9 +157,6 @@ export interface CodexInnerIdeHostV1 {
     checkSyntax(relativePath: string, interpreterId: string): Promise<Diagnostic[]>;
     subscribe(listener: (event: PythonExecutionEvent) => void): Unsubscribe;
   };
-  codex: {
-    addToChat(context: IdeSelectionContext): Promise<HandoffResult>;
-  };
   chatgpt: {
     moreDetails(context: IdeSelectionContext): Promise<HandoffResult>;
   };
@@ -173,6 +171,7 @@ export interface CodexInnerIdeHostV1 {
   };
   window: {
     setDirty(dirty: boolean): void;
+    setPinned(pinned: boolean): void;
     loadState(): Promise<IdeWindowState | null>;
     saveState(state: IdeWindowState): Promise<void>;
     closeIde(): Promise<void>;

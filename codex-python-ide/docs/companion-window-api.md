@@ -11,10 +11,9 @@ window.codexInnerIdeHost.v1
 - `workspace.current`, `workspace.choose`
 - `files.list`, `files.read`, `files.write`, `files.create`, `files.rename`, `files.trash`, `files.watch`
 - `python.discover`, `python.createVenv`, `python.run`, `python.checkSyntax`, `python.terminate`, `python.subscribe`
-- `codex.addToChat`
 - `chatgpt.moreDetails`
-- `window.loadState`, `window.saveState`, `window.setDirty`, `window.closeIde`
+- `window.loadState`, `window.saveState`, `window.setDirty`, `window.setPinned`, `window.closeIde`
 
 每个请求必须携带当前 session token。Swift host 拒绝未知方法、绝对路径、路径穿越和 workspace 外符号链接。
 
-`codex.addToChat` 与 `chatgpt.moreDetails` 只预填目标 composer，不自动发送；定位失败时返回 `mechanism: "clipboard"`。
+`chatgpt.moreDetails` 只预填 Quick Chat composer，不自动发送；定位失败时返回 `mechanism: "clipboard"`。

@@ -339,7 +339,7 @@ final class ControllerCoordinator: IDEWindowControllerDelegate {
         recentIDEChanges.removeAll()
     }
 
-    private func ensureConnected() async throws {
+    private func ensureConnected(forChatHandoff: Bool = false) async throws {
         if mainSession != nil { return }
         let installation = try CodexInstallation.detect()
         self.installation = installation
@@ -348,10 +348,17 @@ final class ControllerCoordinator: IDEWindowControllerDelegate {
 
         if !launcher.runningApplications.isEmpty {
             let alert = NSAlert()
-            alert.messageText = "Codex must relaunch with local debugging enabled."
-            alert.informativeText = "Save active work, then choose Quit and Relaunch. The IDE never terminates Codex without confirmation."
-            alert.addButton(withTitle: "Quit and Relaunch")
-            alert.addButton(withTitle: "Open IDE Only")
+            if forChatHandoff {
+                alert.messageText = "Quick Chat needs Codex local integration."
+                alert.informativeText = "Codex is currently running without the local connection required to open and fill Quick Chat. Save active work, then relaunch Codex. Nothing will be sent automatically."
+                alert.addButton(withTitle: "Quit and Relaunch Codex")
+                alert.addButton(withTitle: "Copy Context Instead")
+            } else {
+                alert.messageText = "Codex must relaunch with local debugging enabled."
+                alert.informativeText = "Save active work, then choose Quit and Relaunch. The IDE never terminates Codex without confirmation."
+                alert.addButton(withTitle: "Quit and Relaunch")
+                alert.addButton(withTitle: "Open IDE Only")
+            }
             guard alert.runModal() == .alertFirstButtonReturn else {
                 throw InnerIDEError.cdpUnavailable("Codex relaunch was skipped")
             }
@@ -505,10 +512,6 @@ final class ControllerCoordinator: IDEWindowControllerDelegate {
             else { throw InnerIDEError.bridgeRejected("run id is missing") }
             try await pythonService.terminate(runID: runID)
             return .object([:])
-        case "codex.addToChat":
-            let context = try request.params.decode(IdeSelectionContext.self)
-            let prompt = try SelectionPrompt.renderForCodex(context)
-            return try .fromEncodable(await addToCodex(prompt))
         case "chatgpt.moreDetails":
             let context = try request.params.decode(IdeSelectionContext.self)
             let prompt = try SelectionPrompt.renderForChatGPT(context)
@@ -540,6 +543,9 @@ final class ControllerCoordinator: IDEWindowControllerDelegate {
         case "window.setDirty":
             dirty = request.params["dirty"]?.boolValue == true
             return .object([:])
+        case "window.setPinned":
+            ideWindowController?.setPinned(request.params["pinned"]?.boolValue == true)
+            return .object([:])
         case "window.loadState":
             return try loadState(workspaceID: workspace.binding.id)
         case "window.saveState":
@@ -555,32 +561,9 @@ final class ControllerCoordinator: IDEWindowControllerDelegate {
         }
     }
 
-    private func addToCodex(_ prompt: String) async -> HandoffResult {
-        guard compatibilityProfile != nil,
-              let mainSession
-        else { return copyToClipboard(prompt, destination: .codex) }
-
-        activateCodex()
-        _ = try? await mainSession.send(method: "Page.bringToFront")
-        if !boundTaskKey.isEmpty {
-            let navigation = try? await mainSession.evaluate(
-                InjectionScripts.navigateToTask(boundTaskKey)
-            )
-            if navigation?["navigated"]?.boolValue == true {
-                try? await Task.sleep(for: .milliseconds(350))
-                try? await waitForMainRendererShell(mainSession, timeout: 5)
-            }
-        }
-
-        guard let result = try? await mainSession.evaluate(
-            InjectionScripts.composerHandoff(prompt: prompt)
-        ), result["ok"]?.boolValue == true
-        else { return copyToClipboard(prompt, destination: .codex) }
-        return HandoffResult(destination: .codex, mechanism: .composer)
-    }
-
     private func openMoreDetails(_ prompt: String) async -> HandoffResult {
-        guard compatibilityProfile != nil,
+        guard await ensureChatHandoffConnection(),
+              compatibilityProfile != nil,
               let mainSession
         else { return copyToClipboard(prompt, destination: .chatgpt) }
 
@@ -597,6 +580,35 @@ final class ControllerCoordinator: IDEWindowControllerDelegate {
             return HandoffResult(destination: .chatgpt, mechanism: .compatibilitySignal)
         }
         return copyToClipboard(prompt, destination: .chatgpt)
+    }
+
+    private func ensureChatHandoffConnection() async -> Bool {
+        if let mainSession,
+           compatibilityProfile != nil,
+           let healthy = try? await mainSession.evaluate(
+               "Boolean(document && document.documentElement)"
+           ),
+           healthy.boolValue == true {
+            return true
+        }
+
+        await resetMainConnection()
+        do {
+            try await ensureConnected(forChatHandoff: true)
+            return mainSession != nil && compatibilityProfile != nil
+        } catch {
+            return false
+        }
+    }
+
+    private func resetMainConnection() async {
+        mainEventsTask?.cancel()
+        mainEventsTask = nil
+        if let mainSession { await mainSession.close() }
+        mainSession = nil
+        mainTargetID = nil
+        port = nil
+        compatibilityProfile = nil
     }
 
     private func dispatchQuickChatShortcut(_ session: CDPSession) async -> Bool {

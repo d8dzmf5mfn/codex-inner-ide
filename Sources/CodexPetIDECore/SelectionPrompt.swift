@@ -18,12 +18,10 @@ public struct IdeSelectionContext: Codable, Equatable, Sendable {
 }
 
 public enum HandoffDestination: String, Codable, Equatable, Sendable {
-    case codex
     case chatgpt
 }
 
 public enum HandoffMechanism: String, Codable, Equatable, Sendable {
-    case composer
     case quickChatShortcut
     case compatibilitySignal
     case clipboard
@@ -43,15 +41,6 @@ public struct HandoffResult: Codable, Equatable, Sendable {
 
 public enum SelectionPrompt {
     public static let maximumSelectionCharacters = 40_000
-
-    public static func renderForCodex(_ context: IdeSelectionContext) throws -> String {
-        try validate(context)
-        return render(
-            context,
-            heading: "IDE selection",
-            instruction: "Use this selected code as context for my next request."
-        )
-    }
 
     public static func renderForChatGPT(_ context: IdeSelectionContext) throws -> String {
         try validate(context)

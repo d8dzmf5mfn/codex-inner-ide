@@ -268,10 +268,8 @@ final class ProtocolSafetyTests: XCTestCase {
             surroundingText: "print(1)",
             dirty: true
         )
-        let codexPrompt = try SelectionPrompt.renderForCodex(context)
         let chatGPTPrompt = try SelectionPrompt.renderForChatGPT(context)
-        XCTAssertTrue(codexPrompt.contains("main.py"))
-        XCTAssertTrue(codexPrompt.contains("next request"))
+        XCTAssertTrue(chatGPTPrompt.contains("main.py"))
         XCTAssertTrue(chatGPTPrompt.contains("Tell me more"))
 
         let oversized = IdeSelectionContext(
@@ -283,14 +281,15 @@ final class ProtocolSafetyTests: XCTestCase {
             surroundingText: "",
             dirty: false
         )
-        XCTAssertThrowsError(try SelectionPrompt.renderForCodex(oversized))
+        XCTAssertThrowsError(try SelectionPrompt.renderForChatGPT(oversized))
     }
 
     func testBridgeBootstrapExposesSeparateCodexAndChatGPTRoutes() {
         let script = InjectionScripts.webViewBridgeBootstrap(sessionToken: "token")
         XCTAssertTrue(script.contains("window.codexInnerIdeHost"))
-        XCTAssertTrue(script.contains("codex.addToChat"))
+        XCTAssertFalse(script.contains("codex.addToChat"))
         XCTAssertTrue(script.contains("chatgpt.moreDetails"))
+        XCTAssertTrue(script.contains("window.setPinned"))
         XCTAssertTrue(script.contains("crypto?.randomUUID"))
         XCTAssertTrue(script.contains("crypto?.getRandomValues"))
         XCTAssertFalse(script.contains("const requestId = crypto.randomUUID()"))
@@ -300,14 +299,15 @@ final class ProtocolSafetyTests: XCTestCase {
         XCTAssertTrue(script.contains("__codexInnerIdeGetActiveEditContext"))
     }
 
-    func testQuickChatHandoffUsesFocusedChatGPTComposerInsteadOfCodexComposer() {
+    func testQuickChatHandoffUsesTheDedicatedQuickChatComposerInsteadOfCodexComposer() {
         let script = InjectionScripts.quickChatComposerHandoff(prompt: "test selection")
 
         XCTAssertTrue(script.contains("data-thread-find-composer"))
-        XCTAssertTrue(script.contains("aria-label=\"Message ChatGPT\""))
+        XCTAssertTrue(script.contains("[contenteditable=\"true\"]"))
         XCTAssertTrue(script.contains("!element.hasAttribute('data-codex-composer')"))
         XCTAssertTrue(script.contains("quickChatCandidates.includes(focused)"))
-        XCTAssertTrue(script.contains("quick_chat_composer_not_focused"))
+        XCTAssertTrue(script.contains("routeMatch && scoped.length === 1"))
+        XCTAssertTrue(script.contains("quick_chat_composer_ambiguous"))
     }
 }
 

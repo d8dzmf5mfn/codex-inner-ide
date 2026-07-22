@@ -95,6 +95,15 @@ final class IDEWindowController: NSWindowController, NSWindowDelegate, WKNavigat
         NSApp.activate(ignoringOtherApps: true)
     }
 
+    func setPinned(_ pinned: Bool) {
+        guard let panel = window as? NSPanel else { return }
+        panel.level = pinned ? .floating : .normal
+        panel.isFloatingPanel = pinned
+        panel.collectionBehavior = pinned
+            ? [.canJoinAllSpaces, .fullScreenAuxiliary]
+            : [.fullScreenPrimary]
+    }
+
     func closeImmediately() {
         guard window != nil else { return }
         allowCloseOnce = true

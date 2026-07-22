@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Code2, Moon, Play, RotateCcw, Save, Sparkles, Sun, TriangleAlert, X } from "lucide-react";
+import { Code2, Moon, Pin, PinOff, Play, RotateCcw, Save, Sparkles, Sun, TriangleAlert, X } from "lucide-react";
 import { resolveInnerHost } from "./bridge/inner-host";
 import {
   editDocument,
@@ -79,6 +79,7 @@ function PythonIde({ host }: { host: CodexInnerIdeHostV1 }) {
   const [proposal, setProposal] = useState<PythonEditProposal | null>(null);
   const [proposalMessage, setProposalMessage] = useState<string | null>(null);
   const [timeTheme, setTimeTheme] = useState<"light" | "dark">(currentTimeTheme);
+  const [pinned, setPinned] = useState(false);
   const documentsRef = useRef(documents);
 
   useEffect(() => {
@@ -132,6 +133,9 @@ function PythonIde({ host }: { host: CodexInnerIdeHostV1 }) {
       setBottomPanelOpen(savedState?.bottomPanelOpen ?? true);
       setExpandedDirectories(savedState?.expandedDirectories ?? []);
       setDocumentViews(savedState?.documentViews ?? {});
+      const restoredPinned = savedState?.pinned ?? false;
+      setPinned(restoredPinned);
+      host.window.setPinned(restoredPinned);
 
       void host.python.discover().then((interpreters) => {
         if (cancelled) return;
@@ -154,11 +158,12 @@ function PythonIde({ host }: { host: CodexInnerIdeHostV1 }) {
         activePath,
         bottomPanelOpen,
         expandedDirectories,
-        documentViews
+        documentViews,
+        pinned
       });
     }, 180);
     return () => window.clearTimeout(timer);
-  }, [activePath, bottomPanelOpen, documentViews, documents, expandedDirectories, host, loaded]);
+  }, [activePath, bottomPanelOpen, documentViews, documents, expandedDirectories, host, loaded, pinned]);
 
   useEffect(() => host.files.watch((change) => {
     setTreeRevision((value) => value + 1);
@@ -354,11 +359,7 @@ function PythonIde({ host }: { host: CodexInnerIdeHostV1 }) {
     }
   };
 
-  const handoffSelection = async (
-    destination: "codex" | "chatgpt",
-    range: SelectionRange,
-    selectedText: string
-  ) => {
+  const handoffSelection = async (range: SelectionRange, selectedText: string) => {
     if (!loaded || !activeDocument) return;
     if (selectedText.length > 40_000) {
       setError("Selection exceeds the 40,000-character handoff limit.");
@@ -378,13 +379,9 @@ function PythonIde({ host }: { host: CodexInnerIdeHostV1 }) {
         surroundingText: lines.slice(start, end).join("\n"),
         dirty: latest.dirty
       };
-      const result = destination === "codex"
-        ? await host.codex.addToChat(context)
-        : await host.chatgpt.moreDetails(context);
+      const result = await host.chatgpt.moreDetails(context);
       if (result.mechanism === "clipboard") {
-        setNotice(`${destination === "codex" ? "Codex" : "ChatGPT"} handoff was unavailable. Context copied to the clipboard.`);
-      } else if (destination === "codex") {
-        setNotice("Selection added to the Codex composer. Nothing was sent.");
+        setNotice("Quick Chat handoff was unavailable. Context copied to the clipboard.");
       } else {
         setNotice("Selection added to ChatGPT Quick Chat. Nothing was sent.");
       }
@@ -511,6 +508,20 @@ function PythonIde({ host }: { host: CodexInnerIdeHostV1 }) {
             <Play size={15} strokeWidth={1.8} fill="currentColor" aria-hidden="true" />
             {running ? "Running…" : "Run Python"}
           </button>
+          <button
+            type="button"
+            className={pinned ? "pin-button pin-button-active" : "pin-button"}
+            aria-label={pinned ? "Unpin IDE window" : "Pin IDE window on top"}
+            aria-pressed={pinned}
+            title={pinned ? "Unpin window" : "Keep window on top"}
+            onClick={() => {
+              const next = !pinned;
+              setPinned(next);
+              host.window.setPinned(next);
+            }}
+          >
+            {pinned ? <PinOff size={15} aria-hidden="true" /> : <Pin size={15} aria-hidden="true" />}
+          </button>
           <button type="button" aria-label="Close IDE" onClick={() => void host.window.closeIde()}><X size={15} /></button>
         </div>
       </header>
@@ -605,8 +616,7 @@ function PythonIde({ host }: { host: CodexInnerIdeHostV1 }) {
             onViewStateChange={(path, state) => setDocumentViews((views) => ({ ...views, [path]: state }))}
             revealDiagnostic={revealDiagnostic}
             theme={timeTheme}
-            onAddToChat={(range, text) => void handoffSelection("codex", range, text)}
-            onMoreDetails={(range, text) => void handoffSelection("chatgpt", range, text)}
+            onMoreDetails={(range, text) => void handoffSelection(range, text)}
             onEditSelection={(range, text) => openEditComposer("selection", { range, selectedText: text })}
             onSelectionChange={(selection) => setActiveSelection(selection && activePath
               ? { relativePath: activePath, ...selection }
