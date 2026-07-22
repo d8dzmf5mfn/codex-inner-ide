@@ -2,6 +2,12 @@
 
 public actor AppServerClient {
     public typealias NotificationHandler = @Sendable (String, JSONValue) -> Void
+    public typealias ServerRequestHandler = @Sendable (String, JSONValue) async -> AppServerServerResponse
+
+    public enum AppServerServerResponse: Sendable {
+        case success(JSONValue)
+        case failure(code: Int, message: String)
+    }
 
     private let executableURL: URL
     private let workingDirectoryURL: URL
@@ -11,7 +17,8 @@ public actor AppServerClient {
     private var nextID = 1
     private var pending: [Int: CheckedContinuation<JSONValue, Error>] = [:]
     private var timeoutTasks: [Int: Task<Void, Never>] = [:]
-    private var notificationHandler: NotificationHandler?
+    private var notificationHandlers: [UUID: NotificationHandler] = [:]
+    private var serverRequestHandler: ServerRequestHandler?
     private var stopped = false
 
     public init(executableURL: URL, workingDirectoryURL: URL) {
@@ -19,8 +26,19 @@ public actor AppServerClient {
         self.workingDirectoryURL = workingDirectoryURL
     }
 
-    public func setNotificationHandler(_ handler: NotificationHandler?) {
-        notificationHandler = handler
+    @discardableResult
+    public func addNotificationHandler(_ handler: @escaping NotificationHandler) -> UUID {
+        let id = UUID()
+        notificationHandlers[id] = handler
+        return id
+    }
+
+    public func removeNotificationHandler(_ id: UUID) {
+        notificationHandlers.removeValue(forKey: id)
+    }
+
+    public func setServerRequestHandler(_ handler: ServerRequestHandler?) {
+        serverRequestHandler = handler
     }
 
     public func start() async throws {
@@ -56,7 +74,7 @@ public actor AppServerClient {
             "clientInfo": .object([
                 "name": .string("codex_inner_ide"),
                 "title": .string("Codex Inner IDE"),
-                "version": .string("0.1.0")
+                "version": .string("0.3.0")
             ]),
             "capabilities": .object([
                 "experimentalApi": .bool(true)
@@ -130,7 +148,15 @@ public actor AppServerClient {
                   let message = try? JSONDecoder().decode(JSONValue.self, from: Data(line)),
                   let object = message.objectValue
             else { continue }
-            if let id = object["id"]?.intValue {
+            if let method = object["method"]?.stringValue,
+               let requestID = object["id"] {
+                let params = object["params"] ?? .object([:])
+                Task { [weak self] in
+                    guard let self else { return }
+                    let response = await self.handleServerRequest(method: method, params: params)
+                    await self.sendServerResponse(id: requestID, response: response)
+                }
+            } else if let id = object["id"]?.intValue {
                 timeoutTasks.removeValue(forKey: id)?.cancel()
                 guard let continuation = pending.removeValue(forKey: id) else { continue }
                 if let error = object["error"]?.objectValue {
@@ -141,9 +167,35 @@ public actor AppServerClient {
                     continuation.resume(returning: object["result"] ?? .object([:]))
                 }
             } else if let method = object["method"]?.stringValue {
-                notificationHandler?(method, object["params"] ?? .object([:]))
+                let params = object["params"] ?? .object([:])
+                for handler in notificationHandlers.values { handler(method, params) }
             }
         }
+    }
+
+    private func handleServerRequest(method: String, params: JSONValue) async -> AppServerServerResponse {
+        guard let serverRequestHandler else {
+            return .failure(code: -32601, message: "Unsupported App Server request: \(method)")
+        }
+        return await serverRequestHandler(method, params)
+    }
+
+    private func sendServerResponse(id: JSONValue, response: AppServerServerResponse) {
+        guard let inputHandle, !stopped else { return }
+        let message: JSONValue
+        switch response {
+        case .success(let result):
+            message = .object(["id": id, "result": result])
+        case .failure(let code, let messageText):
+            message = .object([
+                "id": id,
+                "error": .object([
+                    "code": .number(Double(code)),
+                    "message": .string(messageText)
+                ])
+            ])
+        }
+        try? inputHandle.write(contentsOf: lineData(for: message))
     }
 
     private func expire(id: Int, method: String) {

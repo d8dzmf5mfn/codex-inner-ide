@@ -19,7 +19,9 @@ final class ControllerCoordinator: IDEWindowControllerDelegate {
     private var watcher: WorkspaceWatcher?
     private var appServerClient: AppServerClient?
     private var pythonService: PythonService?
+    private var pythonEditService: PythonEditService?
     private var pythonUnavailableReason: String?
+    private var localBridgeServer: LocalBridgeServer?
 
     private var dirty = false
     private var activeTaskKey = ""
@@ -34,6 +36,25 @@ final class ControllerCoordinator: IDEWindowControllerDelegate {
     private var legacyApplicationSupportURL: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("CodexPetIDE", isDirectory: true)
+    }
+
+    func startLocalBridge() {
+        guard localBridgeServer == nil else { return }
+        let server = LocalBridgeServer(sessionToken: sessionToken) { [weak self] request in
+            guard let self else {
+                return BridgeResponse.failure(
+                    request.requestId,
+                    error: InnerIDEError.localBridgeUnavailable("controller stopped")
+                )
+            }
+            return await self.handleLocalBridge(request)
+        }
+        do {
+            try server.start()
+            localBridgeServer = server
+        } catch {
+            presentMessage("Codex Inner Edit unavailable", detail: error.localizedDescription)
+        }
     }
 
     func openIDE() async {
@@ -80,12 +101,103 @@ final class ControllerCoordinator: IDEWindowControllerDelegate {
 
     func prepareForTermination() async -> Bool {
         guard await closeIDE(requireDirtyConfirmation: true) else { return false }
+        localBridgeServer?.stop()
+        localBridgeServer = nil
         mainEventsTask?.cancel()
         mainEventsTask = nil
         if let mainSession { await mainSession.close() }
         mainSession = nil
         mainTargetID = nil
         return true
+    }
+
+    private func handleLocalBridge(_ request: BridgeRequest) async -> BridgeResponse {
+        do {
+            guard request.version == 1, request.sessionToken == sessionToken else {
+                throw InnerIDEError.bridgeRejected("invalid local bridge session")
+            }
+            return .success(request.requestId, data: try await routeLocalBridge(request))
+        } catch {
+            return .failure(request.requestId, error: error)
+        }
+    }
+
+    private func routeLocalBridge(_ request: BridgeRequest) async throws -> JSONValue {
+        switch request.method {
+        case "mcp.status":
+            guard let controller = ideWindowController,
+                  let context = await controller.requestActiveEditContext(
+                    instruction: "status",
+                    scope: .auto
+                  )
+            else {
+                return .object([
+                    "connected": .bool(true),
+                    "ideOpen": .bool(ideWindowController != nil)
+                ])
+            }
+            var result: [String: JSONValue] = [
+                "connected": .bool(true),
+                "ideOpen": .bool(true),
+                "workspaceId": .string(context.workspaceId),
+                "relativePath": .string(context.relativePath),
+                "language": .string("python"),
+                "selectionAvailable": .bool(context.range != nil)
+            ]
+            if let proposal = await pythonEditService?.currentProposal() {
+                result["proposalId"] = .string(proposal.proposalId)
+                result["proposalState"] = .string(proposal.state.rawValue)
+            }
+            return .object(result)
+        case "mcp.propose":
+            guard let instruction = request.params["instruction"]?.stringValue,
+                  let scope = PythonEditScope(rawValue: request.params["scope"]?.stringValue ?? "auto")
+            else { throw InnerIDEError.proposalInvalid("instruction or scope is missing") }
+            if installation == nil { installation = try? CodexInstallation.detect() }
+            if ideWindowController == nil {
+                try await openIDEWindow(taskKey: activeTaskKey)
+            }
+            guard let controller = ideWindowController,
+                  let context = await waitForActiveEditContext(
+                    controller: controller,
+                    instruction: instruction,
+                    scope: scope
+                  ),
+                  let pythonEditService
+            else {
+                throw InnerIDEError.proposalInvalid("open an editable Python file in Codex Inner IDE")
+            }
+            return try .fromEncodable(try await pythonEditService.request(context))
+        case "mcp.cancel":
+            guard let proposalID = request.params["proposalId"]?.stringValue,
+                  let pythonEditService
+            else { throw InnerIDEError.proposalInvalid("proposal id is missing") }
+            return .object([
+                "cancelled": .bool(await pythonEditService.cancel(proposalID: proposalID))
+            ])
+        default:
+            throw InnerIDEError.bridgeRejected("unknown local method: \(request.method)")
+        }
+    }
+
+    private func waitForActiveEditContext(
+        controller: IDEWindowController,
+        instruction: String,
+        scope: PythonEditScope,
+        timeout: Duration = .seconds(15)
+    ) async -> ActivePythonEditContext? {
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: timeout)
+        repeat {
+            if let context = await controller.requestActiveEditContext(
+                instruction: instruction,
+                scope: scope
+            ) {
+                return context
+            }
+            try? await Task.sleep(for: .milliseconds(150))
+        } while clock.now < deadline && !Task.isCancelled
+        return nil
     }
 
     func ideWindowController(
@@ -196,13 +308,19 @@ final class ControllerCoordinator: IDEWindowControllerDelegate {
             workingDirectoryURL: workspace.rootURL
         )
         let python = PythonService(client: client, workspace: workspace)
+        let edits = PythonEditService(client: client, workspace: workspace)
         await python.setEventHandler { [weak self] event in
             Task { await self?.emit(type: "python.event", payload: try? .fromEncodable(event)) }
         }
+        await edits.setEventHandler { [weak self] event in
+            Task { await self?.emit(type: "edits.event", payload: try? .fromEncodable(event)) }
+        }
         do {
             try await python.start()
+            await edits.start()
             appServerClient = client
             pythonService = python
+            pythonEditService = edits
         } catch {
             pythonUnavailableReason = error.localizedDescription
             await python.stop()
@@ -212,6 +330,8 @@ final class ControllerCoordinator: IDEWindowControllerDelegate {
     private func stopIDERuntime() async {
         watcher?.stop()
         watcher = nil
+        if let pythonEditService { await pythonEditService.stop() }
+        pythonEditService = nil
         if let pythonService { await pythonService.stop() }
         pythonService = nil
         appServerClient = nil
@@ -393,6 +513,30 @@ final class ControllerCoordinator: IDEWindowControllerDelegate {
             let context = try request.params.decode(IdeSelectionContext.self)
             let prompt = try SelectionPrompt.renderForChatGPT(context)
             return try .fromEncodable(await openMoreDetails(prompt))
+        case "edits.request":
+            guard let pythonEditService else {
+                throw InnerIDEError.appServerUnavailable(
+                    pythonUnavailableReason ?? "Codex edit service is not ready"
+                )
+            }
+            let edit = try request.params.decode(PythonEditRequest.self)
+            guard edit.instruction == edit.context.instruction,
+                  edit.scope == edit.context.scope
+            else { throw InnerIDEError.bridgeRejected("edit request context does not match") }
+            return try .fromEncodable(try await pythonEditService.request(edit.context))
+        case "edits.cancel":
+            guard let pythonEditService,
+                  let proposalID = request.params["proposalId"]?.stringValue
+            else { throw InnerIDEError.bridgeRejected("proposal id is missing") }
+            return .object([
+                "cancelled": .bool(await pythonEditService.cancel(proposalID: proposalID))
+            ])
+        case "edits.decide":
+            guard let pythonEditService else {
+                throw InnerIDEError.appServerUnavailable("Codex edit service is not ready")
+            }
+            try await pythonEditService.decide(request.params.decode(PythonEditDecision.self))
+            return .object([:])
         case "window.setDirty":
             dirty = request.params["dirty"]?.boolValue == true
             return .object([:])

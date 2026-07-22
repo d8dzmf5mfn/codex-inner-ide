@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Code2, Play, RotateCcw, Save, TriangleAlert, X } from "lucide-react";
+import { Code2, Moon, Play, RotateCcw, Save, Sparkles, Sun, TriangleAlert, X } from "lucide-react";
 import { resolveInnerHost } from "./bridge/inner-host";
 import {
   editDocument,
@@ -11,7 +11,10 @@ import {
 import { EditorPane } from "./components/EditorPane";
 import { FileTree } from "./components/FileTree";
 import { OutputPanel } from "./components/OutputPanel";
+import { digestText } from "./core/edits";
+import { currentTimeTheme } from "./core/theme";
 import type {
+  ActivePythonEditContext,
   CodexInnerIdeHostV1,
   Diagnostic,
   DocumentViewState,
@@ -20,11 +23,15 @@ import type {
   FileSnapshot,
   IdeSelectionContext,
   PythonInterpreter,
+  PythonEditProposal,
+  PythonEditScope,
   SelectionRange,
   WorkspaceBinding
 } from "./types/inner-host";
 
 type Conflict = { relativePath: string; disk: FileSnapshot };
+type ActiveSelection = { relativePath: string; range: SelectionRange; selectedText: string };
+type EditComposer = { scope: PythonEditScope; instruction: string };
 type LoadedIde = {
   workspace: WorkspaceBinding;
   rootEntries: FileEntry[];
@@ -66,6 +73,12 @@ function PythonIde({ host }: { host: CodexInnerIdeHostV1 }) {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [conflict, setConflict] = useState<Conflict | null>(null);
+  const [activeSelection, setActiveSelection] = useState<ActiveSelection | null>(null);
+  const [editComposer, setEditComposer] = useState<EditComposer | null>(null);
+  const [lastEditRequest, setLastEditRequest] = useState<EditComposer>({ scope: "file", instruction: "" });
+  const [proposal, setProposal] = useState<PythonEditProposal | null>(null);
+  const [proposalMessage, setProposalMessage] = useState<string | null>(null);
+  const [timeTheme, setTimeTheme] = useState<"light" | "dark">(currentTimeTheme);
   const documentsRef = useRef(documents);
 
   useEffect(() => {
@@ -74,13 +87,27 @@ function PythonIde({ host }: { host: CodexInnerIdeHostV1 }) {
   }, [documents, host]);
 
   useEffect(() => {
+    const refresh = () => setTimeTheme(currentTimeTheme());
+    refresh();
+    const timer = window.setInterval(refresh, 60_000);
+    window.addEventListener("focus", refresh);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", refresh);
+    };
+  }, []);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = timeTheme;
+  }, [timeTheme]);
+
+  useEffect(() => {
     let cancelled = false;
     void Promise.all([
       host.workspace.current(),
       host.files.list(""),
-      host.python.discover().catch(() => [] as PythonInterpreter[]),
       host.window.loadState()
-    ]).then(async ([workspace, rootEntries, interpreters, savedState]) => {
+    ]).then(async ([workspace, rootEntries, savedState]) => {
       const preferred = savedState?.openPaths ?? [];
       const fallback = rootEntries.find((entry) => entry.kind === "file" && entry.name.endsWith(".py"))?.relativePath;
       const paths = preferred.length > 0 ? preferred : fallback ? [fallback] : [];
@@ -96,16 +123,23 @@ function PythonIde({ host }: { host: CodexInnerIdeHostV1 }) {
       setLoaded({
         workspace,
         rootEntries,
-        interpreters,
+        interpreters: [],
         savedExpanded: savedState?.expandedDirectories ?? [],
         savedViews: savedState?.documentViews ?? {}
       });
       setDocuments(initialDocuments);
       setActivePath(initialActive);
-      setSelectedInterpreterId(interpreters[0]?.id ?? "");
       setBottomPanelOpen(savedState?.bottomPanelOpen ?? true);
       setExpandedDirectories(savedState?.expandedDirectories ?? []);
       setDocumentViews(savedState?.documentViews ?? {});
+
+      void host.python.discover().then((interpreters) => {
+        if (cancelled) return;
+        setLoaded((current) => current ? { ...current, interpreters } : current);
+        setSelectedInterpreterId((current) => current || interpreters[0]?.id || "");
+      }).catch((reason: unknown) => {
+        if (!cancelled) setNotice(message(reason, "Python interpreter discovery is unavailable"));
+      });
     }).catch((reason: unknown) => {
       if (!cancelled) setError(message(reason, "Unable to initialize the IDE"));
     });
@@ -163,7 +197,75 @@ function PythonIde({ host }: { host: CodexInnerIdeHostV1 }) {
     }
   }), [host]);
 
+  useEffect(() => host.edits.subscribe((event) => {
+    const { proposal: next, message: nextMessage } = event;
+    if (next.state === "accepted" || next.state === "rejected") {
+      setProposal((current) => current?.proposalId === next.proposalId ? null : current);
+      setProposalMessage(null);
+      return;
+    }
+    if (next.state === "failed") {
+      setProposal((current) => current?.proposalId === next.proposalId ? null : current);
+      setProposalMessage(null);
+      setError(nextMessage ?? "Codex did not return a valid edit proposal.");
+      return;
+    }
+    setProposal(next);
+    setProposalMessage(nextMessage ?? null);
+    if (next.state === "ready") setEditComposer(null);
+  }), [host]);
+
   const activeDocument = documents.find((document) => document.relativePath === activePath) ?? null;
+
+  useEffect(() => {
+    setActiveSelection((current) => current?.relativePath === activePath ? current : null);
+  }, [activePath]);
+
+  useEffect(() => {
+    window.__codexInnerIdeGetActiveEditContext = async (instruction, requestedScope) => {
+      if (!loaded || !activePath) return null;
+      const document = documentsRef.current.find((item) => item.relativePath === activePath);
+      if (!document || document.readonly || !document.relativePath.endsWith(".py")) return null;
+      const selection = activeSelection?.relativePath === activePath ? activeSelection : null;
+      const scope: PythonEditScope = requestedScope === "auto"
+        ? selection ? "selection" : "file"
+        : requestedScope;
+      if (scope === "selection" && !selection) return null;
+      const context: ActivePythonEditContext = {
+        workspaceId: loaded.workspace.id,
+        relativePath: document.relativePath,
+        scope,
+        range: scope === "selection" ? selection?.range ?? null : null,
+        bufferContent: document.content,
+        bufferDigest: await digestText(document.content),
+        instruction,
+        readonly: document.readonly
+      };
+      return context;
+    };
+    return () => { delete window.__codexInnerIdeGetActiveEditContext; };
+  }, [activePath, activeSelection, loaded]);
+
+  useEffect(() => {
+    if (!proposal || (proposal.state !== "generating" && proposal.state !== "ready")) return;
+    const document = documents.find((item) => item.relativePath === proposal.relativePath);
+    if (!document) {
+      setProposal((current) => current?.proposalId === proposal.proposalId
+        ? { ...current, state: "stale" }
+        : current);
+      void host.edits.decide(proposal.proposalId, "stale").catch(() => undefined);
+      return;
+    }
+    let cancelled = false;
+    void digestText(document.content).then((digest) => {
+      if (cancelled || digest === proposal.baseBufferDigest) return;
+      setProposal((current) => current?.proposalId === proposal.proposalId
+        ? { ...current, state: "stale" }
+        : current);
+      void host.edits.decide(proposal.proposalId, "stale").catch(() => undefined);
+    });
+    return () => { cancelled = true; };
+  }, [documents, host, proposal]);
 
   const openFile = useCallback(async (relativePath: string) => {
     setError(null);
@@ -291,6 +393,69 @@ function PythonIde({ host }: { host: CodexInnerIdeHostV1 }) {
     }
   };
 
+  const openEditComposer = (
+    scope: "selection" | "file",
+    selection?: { range: SelectionRange; selectedText: string }
+  ) => {
+    if (!activeDocument?.relativePath.endsWith(".py") || activeDocument.readonly) {
+      setError("Open an editable Python file before requesting a Codex proposal.");
+      return;
+    }
+    if (proposal?.state === "generating" || proposal?.state === "ready") {
+      setError("Accept, reject, or cancel the current Codex proposal first.");
+      return;
+    }
+    if (selection) {
+      setActiveSelection({ relativePath: activeDocument.relativePath, ...selection });
+    }
+    setEditComposer({ scope, instruction: lastEditRequest.instruction });
+  };
+
+  const submitEditRequest = async () => {
+    if (!editComposer) return;
+    const instruction = editComposer.instruction.trim();
+    if (!instruction) {
+      setError("Describe the Python change you want Codex to propose.");
+      return;
+    }
+    setError(null);
+    setNotice(null);
+    setLastEditRequest({ ...editComposer, instruction });
+    try {
+      await host.edits.request({ instruction, scope: editComposer.scope });
+      setEditComposer(null);
+    } catch (reason) {
+      setError(message(reason, "Unable to start the Codex edit proposal"));
+    }
+  };
+
+  const applyProposalToBuffer = (proposalId: string, content: string) => {
+    if (!proposal || proposal.proposalId !== proposalId) return;
+    setProposal({ ...proposal, state: "accepted" });
+    setDocuments((items) => items.map((item) =>
+      item.relativePath === proposal.relativePath ? editDocument(item, content) : item
+    ));
+    setNotice("Codex proposal applied to the editor buffer. Press ⌘S to save it to disk.");
+    void host.edits.decide(proposalId, "accepted").catch((reason) => {
+      setError(message(reason, "Unable to record the proposal decision"));
+    });
+  };
+
+  const rejectProposal = (proposalId: string) => {
+    setProposal((current) => current?.proposalId === proposalId ? null : current);
+    setProposalMessage(null);
+    void host.edits.decide(proposalId, "rejected").catch((reason) => {
+      setError(message(reason, "Unable to reject the proposal"));
+    });
+  };
+
+  const cancelProposal = (proposalId: string) => {
+    void host.edits.cancel(proposalId).then(() => {
+      setProposal((current) => current?.proposalId === proposalId ? null : current);
+      setProposalMessage(null);
+    }).catch((reason) => setError(message(reason, "Unable to cancel the proposal")));
+  };
+
   const closeDocument = (path: string, confirmDirty = true) => {
     const current = documentsRef.current;
     const document = current.find((item) => item.relativePath === path);
@@ -316,6 +481,10 @@ function PythonIde({ host }: { host: CodexInnerIdeHostV1 }) {
           <span className="root-label">{loaded.workspace.rootLabel}</span>
         </div>
         <div className="titlebar-actions">
+          <span className="time-theme-label" title="Theme follows local time: light 07:00–18:59, dark 19:00–06:59">
+            {timeTheme === "light" ? <Sun size={14} /> : <Moon size={14} />}
+            Auto
+          </span>
           {loaded.interpreters.length > 0 ? (
             <select aria-label="Python interpreter" value={selectedInterpreterId} onChange={(event) => setSelectedInterpreterId(event.target.value)}>
               {loaded.interpreters.map((interpreter) => (
@@ -331,6 +500,13 @@ function PythonIde({ host }: { host: CodexInnerIdeHostV1 }) {
           <button type="button" onClick={() => activePath && void savePath(activePath)} disabled={!activeDocument?.dirty}>
             <Save size={15} strokeWidth={1.7} aria-hidden="true" /> Save
           </button>
+          <button
+            type="button"
+            onClick={() => openEditComposer("file")}
+            disabled={!activeDocument?.relativePath.endsWith(".py") || activeDocument.readonly}
+          >
+            <Sparkles size={15} strokeWidth={1.7} aria-hidden="true" /> Edit current file
+          </button>
           <button className="run-button" type="button" onClick={() => void runActiveFile()} disabled={running || !activeDocument?.relativePath.endsWith(".py") || !selectedInterpreterId}>
             <Play size={15} strokeWidth={1.8} fill="currentColor" aria-hidden="true" />
             {running ? "Running…" : "Run Python"}
@@ -338,6 +514,37 @@ function PythonIde({ host }: { host: CodexInnerIdeHostV1 }) {
           <button type="button" aria-label="Close IDE" onClick={() => void host.window.closeIde()}><X size={15} /></button>
         </div>
       </header>
+
+      {editComposer && (
+        <form
+          className="edit-request-bar"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void submitEditRequest();
+          }}
+        >
+          <Sparkles size={16} aria-hidden="true" />
+          <label htmlFor="codex-edit-instruction">
+            {editComposer.scope === "selection" ? "Edit selected Python" : "Edit current Python file"}
+          </label>
+          <textarea
+            id="codex-edit-instruction"
+            autoFocus
+            value={editComposer.instruction}
+            placeholder="Describe the change. Press ⌘Enter to generate a read-only proposal."
+            onChange={(event) => setEditComposer((current) => current ? { ...current, instruction: event.target.value } : current)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && event.metaKey) {
+                event.preventDefault();
+                void submitEditRequest();
+              }
+              if (event.key === "Escape") setEditComposer(null);
+            }}
+          />
+          <button type="submit">Generate proposal</button>
+          <button type="button" onClick={() => setEditComposer(null)}>Cancel</button>
+        </form>
+      )}
 
       {(error || notice || conflict) && (
         <div className={`notice-bar${error || conflict ? " notice-error" : ""}`} role="status">
@@ -397,8 +604,26 @@ function PythonIde({ host }: { host: CodexInnerIdeHostV1 }) {
             documentViews={documentViews}
             onViewStateChange={(path, state) => setDocumentViews((views) => ({ ...views, [path]: state }))}
             revealDiagnostic={revealDiagnostic}
+            theme={timeTheme}
             onAddToChat={(range, text) => void handoffSelection("codex", range, text)}
             onMoreDetails={(range, text) => void handoffSelection("chatgpt", range, text)}
+            onEditSelection={(range, text) => openEditComposer("selection", { range, selectedText: text })}
+            onSelectionChange={(selection) => setActiveSelection(selection && activePath
+              ? { relativePath: activePath, ...selection }
+              : null)}
+            proposal={proposal}
+            proposalMessage={proposalMessage}
+            onProposalApplied={applyProposalToBuffer}
+            onProposalRejected={rejectProposal}
+            onProposalStale={(proposalId) => {
+              setProposal((current) => current?.proposalId === proposalId ? { ...current, state: "stale" } : current);
+              void host.edits.decide(proposalId, "stale").catch(() => undefined);
+            }}
+            onProposalCancelled={cancelProposal}
+            onRegenerate={() => {
+              setProposal(null);
+              setEditComposer(lastEditRequest);
+            }}
           />
           <OutputPanel
             open={bottomPanelOpen}

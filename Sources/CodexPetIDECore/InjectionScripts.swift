@@ -266,6 +266,18 @@ public enum InjectionScripts {
             chatgpt: {
               moreDetails: (context) => call('chatgpt.moreDetails', context)
             },
+            edits: {
+              request: async (request) => {
+                const getContext = window.__codexInnerIdeGetActiveEditContext;
+                if (typeof getContext !== 'function') throw new Error('The editor context is not ready');
+                const context = await getContext(request.instruction, request.scope || 'auto');
+                if (!context) throw new Error('Open an editable Python file before requesting a proposal');
+                return call('edits.request', { instruction: request.instruction, scope: context.scope, context });
+              },
+              cancel: (proposalId) => call('edits.cancel', { proposalId }),
+              decide: (proposalId, decision) => call('edits.decide', { proposalId, decision }),
+              subscribe: (listener) => subscribe('edits.event', listener)
+            },
             window: {
               setDirty: (dirty) => { void call('window.setDirty', { dirty }); },
               loadState: () => call('window.loadState'),

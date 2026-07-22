@@ -116,6 +116,34 @@ final class IDEWindowController: NSWindowController, NSWindowDelegate, WKNavigat
         }
     }
 
+    func requestActiveEditContext(
+        instruction: String,
+        scope: PythonEditScope
+    ) async -> ActivePythonEditContext? {
+        do {
+            let value = try await webView.callAsyncJavaScript(
+                """
+                const getter = window.__codexInnerIdeGetActiveEditContext;
+                if (typeof getter !== "function") return null;
+                const value = await getter(instruction, scope);
+                return value == null ? null : JSON.stringify(value);
+                """,
+                arguments: [
+                    "instruction": instruction,
+                    "scope": scope.rawValue
+                ],
+                in: nil,
+                contentWorld: .page
+            )
+            guard let text = value as? String,
+                  let data = text.data(using: .utf8)
+            else { return nil }
+            return try JSONDecoder().decode(ActivePythonEditContext.self, from: data)
+        } catch {
+            return nil
+        }
+    }
+
     func emit(type: String, payload: JSONValue) {
         let event = JSONValue.object(["type": .string(type), "payload": payload])
         guard let data = try? JSONEncoder().encode(event),

@@ -17,6 +17,11 @@ BUILD_ARCH="$(uname -m)"
 LEGACY_DIST_APP="$DIST_DIR/Codex Pet IDE.app"
 APP_ARCHIVE="$DIST_DIR/$APP_NAME-v$VERSION-macos-$BUILD_ARCH.zip"
 CHECKSUM_FILE="$APP_ARCHIVE.sha256"
+PLUGIN_NAME="codex-inner-edit"
+PLUGIN_VERSION="0.1.0"
+PLUGIN_DIR="$ROOT_DIR/plugins/$PLUGIN_NAME"
+PLUGIN_ARCHIVE="$DIST_DIR/$PLUGIN_NAME-v$PLUGIN_VERSION.zip"
+PLUGIN_CHECKSUM_FILE="$PLUGIN_ARCHIVE.sha256"
 ARCHIVE_FILENAME="${APP_ARCHIVE##*/}"
 CHECKSUM_FILENAME="${CHECKSUM_FILE##*/}"
 LEGACY_APP_ARCHIVE="$DIST_DIR/Codex Pet IDE.zip"
@@ -63,6 +68,8 @@ rm -rf "$STAGE_APP_BUNDLE"
 rm -rf "$LEGACY_DIST_APP"
 rm -f "$APP_ARCHIVE"
 rm -f "$CHECKSUM_FILE"
+rm -f "$PLUGIN_ARCHIVE"
+rm -f "$PLUGIN_CHECKSUM_FILE"
 rm -f "$LEGACY_APP_ARCHIVE"
 mkdir -p "$APP_MACOS" "$APP_RESOURCES/Renderer"
 cp "$BUILD_BINARY" "$APP_BINARY"
@@ -79,6 +86,11 @@ mkdir -p "$DIST_DIR"
   cd "$DIST_DIR"
   /usr/bin/shasum -a 256 "$ARCHIVE_FILENAME" > "$CHECKSUM_FILENAME"
 )
+/usr/bin/ditto -c -k --keepParent --norsrc "$PLUGIN_DIR" "$PLUGIN_ARCHIVE"
+(
+  cd "$DIST_DIR"
+  /usr/bin/shasum -a 256 "${PLUGIN_ARCHIVE##*/}" > "${PLUGIN_CHECKSUM_FILE##*/}"
+)
 
 if [[ "$MODE" != "--build-only" && "$MODE" != "build-only" ]]; then
   mkdir -p "$INSTALL_DIR"
@@ -92,6 +104,8 @@ fi
 
 echo "Archive: $APP_ARCHIVE"
 echo "SHA-256: $CHECKSUM_FILE"
+echo "Plugin: $PLUGIN_ARCHIVE"
+echo "Plugin SHA-256: $PLUGIN_CHECKSUM_FILE"
 
 open_app() {
   /usr/bin/open -n "$APP_BUNDLE"

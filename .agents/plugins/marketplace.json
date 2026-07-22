@@ -1,0 +1,20 @@
+{
+  "name": "codex-inner-ide",
+  "interface": {
+    "displayName": "Codex Inner IDE"
+  },
+  "plugins": [
+    {
+      "name": "codex-inner-edit",
+      "source": {
+        "source": "local",
+        "path": "./plugins/codex-inner-edit"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

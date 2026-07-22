@@ -7,6 +7,7 @@ import type {
   HandoffResult,
   IdeWindowState,
   PythonExecutionEvent,
+  PythonEditProposalEvent,
   PythonInterpreter
 } from "../types/inner-host";
 
@@ -87,6 +88,7 @@ export function createMockInnerHost(): CodexInnerIdeHostV1 {
   const directories = new Set<string>(["tests"]);
   const fileListeners = new Set<(change: FileChange) => void>();
   const pythonListeners = new Set<(event: PythonExecutionEvent) => void>();
+  const editListeners = new Set<(event: PythonEditProposalEvent) => void>();
   let state: IdeWindowState | null = null;
 
   const interpreter: PythonInterpreter = {
@@ -209,6 +211,46 @@ export function createMockInnerHost(): CodexInnerIdeHostV1 {
     },
     chatgpt: {
       async moreDetails() { return handoff("chatgpt"); }
+    },
+    edits: {
+      async request(request) {
+        const proposalId = randomId();
+        const content = files.get("main.py") ?? "";
+        const baseBufferDigest = await digest(content);
+        queueMicrotask(() => editListeners.forEach((listener) => listener({
+          proposal: {
+            proposalId,
+            workspaceId: "mock-workspace",
+            relativePath: "main.py",
+            scope: request.scope === "selection" ? "selection" : "file",
+            baseBufferDigest,
+            summary: request.instruction,
+            replacementText: `${content}\n# Proposed by Codex\n`,
+            state: "ready"
+          }
+        })));
+        return { proposalId, state: "generating" };
+      },
+      async cancel(proposalId) {
+        editListeners.forEach((listener) => listener({
+          proposal: {
+            proposalId,
+            workspaceId: "mock-workspace",
+            relativePath: "main.py",
+            scope: "file",
+            baseBufferDigest: "",
+            summary: "Cancelled",
+            replacementText: "",
+            state: "rejected"
+          }
+        }));
+        return { cancelled: true };
+      },
+      async decide() {},
+      subscribe(listener) {
+        editListeners.add(listener);
+        return () => editListeners.delete(listener);
+      }
     },
     window: {
       setDirty() {},

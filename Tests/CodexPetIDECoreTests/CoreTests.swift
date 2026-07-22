@@ -120,6 +120,85 @@ final class WorkspaceServiceTests: XCTestCase {
     }
 }
 
+final class PythonEditValidatorTests: XCTestCase {
+    private var temporaryURL: URL!
+    private var workspace: WorkspaceService!
+
+    override func setUpWithError() throws {
+        temporaryURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("CodexInnerEdit-Tests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: temporaryURL, withIntermediateDirectories: true)
+        try Data("value = 1\nprint(value)\n".utf8)
+            .write(to: temporaryURL.appendingPathComponent("main.py"))
+        workspace = try WorkspaceService(rootURL: temporaryURL)
+    }
+
+    override func tearDownWithError() throws {
+        if let temporaryURL { try? FileManager.default.removeItem(at: temporaryURL) }
+    }
+
+    func testAutoScopeUsesSelectionAndValidatesUTF16Range() throws {
+        let content = "value = \"😀\"\nprint(value)\n"
+        let context = ActivePythonEditContext(
+            workspaceId: workspace.binding.id,
+            relativePath: "main.py",
+            scope: .auto,
+            range: SelectionRange(startLine: 1, startColumn: 10, endLine: 1, endColumn: 12),
+            bufferContent: content,
+            bufferDigest: WorkspaceService.sha256(Data(content.utf8)),
+            instruction: "Use a named constant",
+            readonly: false
+        )
+
+        let validated = try PythonEditValidator.validate(context, workspace: workspace)
+
+        XCTAssertEqual(validated.scope, .selection)
+        XCTAssertEqual(PythonEditValidator.selectedText(in: content, range: validated.range!), "😀")
+    }
+
+    func testRejectsForgedDigestAndOversizedWholeFile() throws {
+        let forged = ActivePythonEditContext(
+            workspaceId: workspace.binding.id,
+            relativePath: "main.py",
+            scope: .file,
+            range: nil,
+            bufferContent: "print('changed')\n",
+            bufferDigest: "not-the-buffer-digest",
+            instruction: "Change it",
+            readonly: false
+        )
+        XCTAssertThrowsError(try PythonEditValidator.validate(forged, workspace: workspace))
+
+        let large = String(repeating: "x", count: PythonEditValidator.maximumFileCharacters + 1)
+        let oversized = ActivePythonEditContext(
+            workspaceId: workspace.binding.id,
+            relativePath: "main.py",
+            scope: .file,
+            range: nil,
+            bufferContent: large,
+            bufferDigest: WorkspaceService.sha256(Data(large.utf8)),
+            instruction: "Change it",
+            readonly: false
+        )
+        XCTAssertThrowsError(try PythonEditValidator.validate(oversized, workspace: workspace))
+    }
+
+    func testRejectsNoOpReplacement() throws {
+        let content = "value = 1\nprint(value)\n"
+        let context = ActivePythonEditContext(
+            workspaceId: workspace.binding.id,
+            relativePath: "main.py",
+            scope: .file,
+            range: nil,
+            bufferContent: content,
+            bufferDigest: WorkspaceService.sha256(Data(content.utf8)),
+            instruction: "Change it",
+            readonly: false
+        )
+        XCTAssertThrowsError(try PythonEditValidator.validateReplacement(content, for: context))
+    }
+}
+
 final class ProtocolSafetyTests: XCTestCase {
     func testCDPValidationRejectsNonLoopbackAndNonAppTargets() throws {
         let valid = CDPTarget(
@@ -216,6 +295,9 @@ final class ProtocolSafetyTests: XCTestCase {
         XCTAssertTrue(script.contains("crypto?.getRandomValues"))
         XCTAssertFalse(script.contains("const requestId = crypto.randomUUID()"))
         XCTAssertFalse(script.contains("codexPetIdeHost"))
+        XCTAssertTrue(script.contains("edits.request"))
+        XCTAssertTrue(script.contains("edits.event"))
+        XCTAssertTrue(script.contains("__codexInnerIdeGetActiveEditContext"))
     }
 
     func testQuickChatHandoffUsesFocusedChatGPTComposerInsteadOfCodexComposer() {
@@ -265,6 +347,16 @@ final class AppServerIntegrationTests: XCTestCase {
         XCTAssertEqual(inside["exitCode"]?.intValue, 0)
         XCTAssertTrue(FileManager.default.fileExists(atPath: root.appendingPathComponent("inside.txt").path))
 
+        let readOnlyTarget = root.appendingPathComponent("read-only-write.txt")
+        let readOnly = try await command(
+            client,
+            argv: ["/usr/bin/python3", "-c", "open('read-only-write.txt','w').write('blocked')"],
+            cwd: root,
+            sandbox: .object(["type": .string("readOnly"), "networkAccess": .bool(false)])
+        )
+        XCTAssertNotEqual(readOnly["exitCode"]?.intValue, 0)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: readOnlyTarget.path))
+
         let outsideResult = try await command(
             client,
             argv: ["/usr/bin/python3", "-c", "import pathlib,sys; pathlib.Path(sys.argv[1]).write_text('escape')", outside.path],
@@ -281,6 +373,74 @@ final class AppServerIntegrationTests: XCTestCase {
             sandbox: sandbox
         )
         XCTAssertNotEqual(network["exitCode"]?.intValue, 0)
+    }
+
+    func testReadOnlyProposalDoesNotChangeFile() async throws {
+        guard ProcessInfo.processInfo.environment["CODEX_INNER_EDIT_LIVE_TEST"] == "1" else {
+            throw XCTSkip("Set CODEX_INNER_EDIT_LIVE_TEST=1 to call the configured Codex model")
+        }
+        let codexURL = URL(fileURLWithPath: "/Applications/ChatGPT.app/Contents/Resources/codex")
+        guard FileManager.default.isExecutableFile(atPath: codexURL.path) else {
+            throw XCTSkip("Bundled Codex App Server is unavailable")
+        }
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("CodexInnerEdit-Live-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let file = root.appendingPathComponent("main.py")
+        let content = "def answer():\n    return 42\n"
+        try Data(content.utf8).write(to: file)
+        let before = WorkspaceService.sha256(try Data(contentsOf: file))
+
+        let workspace = try WorkspaceService(rootURL: root)
+        let client = AppServerClient(executableURL: codexURL, workingDirectoryURL: root)
+        try await client.start()
+        let service = PythonEditService(client: client, workspace: workspace)
+        let events = AsyncStream.makeStream(of: PythonEditProposalEvent.self)
+        await service.setEventHandler { events.continuation.yield($0) }
+        await service.start()
+        defer {
+            events.continuation.finish()
+            Task {
+                await service.stop()
+                await client.stop()
+            }
+        }
+
+        let context = ActivePythonEditContext(
+            workspaceId: workspace.binding.id,
+            relativePath: "main.py",
+            scope: .file,
+            range: nil,
+            bufferContent: content,
+            bufferDigest: WorkspaceService.sha256(Data(content.utf8)),
+            instruction: "Add a concise return type annotation without changing behavior.",
+            readonly: false
+        )
+        _ = try await service.request(context)
+        let terminal = try await withThrowingTaskGroup(of: PythonEditProposalEvent.self) { group in
+            group.addTask {
+                for await event in events.stream where event.proposal.state != .generating {
+                    return event
+                }
+                throw InnerIDEError.proposalInvalid("proposal event stream ended")
+            }
+            group.addTask {
+                try await Task.sleep(for: .seconds(120))
+                throw InnerIDEError.appServerUnavailable("live proposal timed out")
+            }
+            let value = try await group.next()!
+            group.cancelAll()
+            return value
+        }
+
+        XCTAssertEqual(terminal.proposal.state, .ready, terminal.message ?? "proposal failed")
+        XCTAssertNotEqual(terminal.proposal.replacementText, content)
+        XCTAssertEqual(WorkspaceService.sha256(try Data(contentsOf: file)), before)
+        try await service.decide(PythonEditDecision(
+            proposalId: terminal.proposal.proposalId,
+            decision: .rejected
+        ))
     }
 
     private func command(

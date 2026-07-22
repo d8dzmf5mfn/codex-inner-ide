@@ -14,6 +14,10 @@ public enum InnerIDEError: Error, LocalizedError, Equatable, Sendable {
     case binaryFile(String)
     case appServerUnavailable(String)
     case commandFailed(String)
+    case proposalPending
+    case proposalStale
+    case proposalInvalid(String)
+    case localBridgeUnavailable(String)
     case rendererAssetsMissing
 
     public var errorDescription: String? {
@@ -33,6 +37,10 @@ public enum InnerIDEError: Error, LocalizedError, Equatable, Sendable {
         case .binaryFile(let path): return "Binary files are read-only: \(path)"
         case .appServerUnavailable(let reason): return "Codex App Server is unavailable: \(reason)"
         case .commandFailed(let reason): return "Command failed: \(reason)"
+        case .proposalPending: return "A Codex edit proposal is already active."
+        case .proposalStale: return "The Codex edit proposal is stale."
+        case .proposalInvalid(let reason): return "Invalid Codex edit proposal: \(reason)"
+        case .localBridgeUnavailable(let reason): return "Codex Inner IDE bridge unavailable: \(reason)"
         case .rendererAssetsMissing: return "The embedded IDE renderer is missing or invalid."
         }
     }
@@ -52,8 +60,134 @@ public enum InnerIDEError: Error, LocalizedError, Equatable, Sendable {
         case .binaryFile: "binary_file"
         case .appServerUnavailable: "app_server_unavailable"
         case .commandFailed: "command_failed"
+        case .proposalPending: "proposal_pending"
+        case .proposalStale: "proposal_stale"
+        case .proposalInvalid: "proposal_invalid"
+        case .localBridgeUnavailable: "local_bridge_unavailable"
         case .rendererAssetsMissing: "renderer_assets_missing"
         }
+    }
+}
+
+public enum PythonEditScope: String, Codable, Equatable, Sendable {
+    case auto
+    case selection
+    case file
+}
+
+public enum PythonEditProposalState: String, Codable, Equatable, Sendable {
+    case generating
+    case ready
+    case stale
+    case accepted
+    case rejected
+    case failed
+}
+
+public struct ActivePythonEditContext: Codable, Equatable, Sendable {
+    public let workspaceId: String
+    public let relativePath: String
+    public let scope: PythonEditScope
+    public let range: SelectionRange?
+    public let bufferContent: String
+    public let bufferDigest: String
+    public let instruction: String
+    public let readonly: Bool
+
+    public init(
+        workspaceId: String,
+        relativePath: String,
+        scope: PythonEditScope,
+        range: SelectionRange?,
+        bufferContent: String,
+        bufferDigest: String,
+        instruction: String,
+        readonly: Bool
+    ) {
+        self.workspaceId = workspaceId
+        self.relativePath = relativePath
+        self.scope = scope
+        self.range = range
+        self.bufferContent = bufferContent
+        self.bufferDigest = bufferDigest
+        self.instruction = instruction
+        self.readonly = readonly
+    }
+}
+
+public struct PythonEditProposal: Codable, Equatable, Sendable {
+    public let proposalId: String
+    public let workspaceId: String
+    public let relativePath: String
+    public let scope: PythonEditScope
+    public let range: SelectionRange?
+    public let baseBufferDigest: String
+    public let summary: String
+    public let replacementText: String
+    public let state: PythonEditProposalState
+
+    public init(
+        proposalId: String,
+        workspaceId: String,
+        relativePath: String,
+        scope: PythonEditScope,
+        range: SelectionRange?,
+        baseBufferDigest: String,
+        summary: String,
+        replacementText: String,
+        state: PythonEditProposalState
+    ) {
+        self.proposalId = proposalId
+        self.workspaceId = workspaceId
+        self.relativePath = relativePath
+        self.scope = scope
+        self.range = range
+        self.baseBufferDigest = baseBufferDigest
+        self.summary = summary
+        self.replacementText = replacementText
+        self.state = state
+    }
+}
+
+public struct PythonEditProposalEvent: Codable, Equatable, Sendable {
+    public let proposal: PythonEditProposal
+    public let message: String?
+
+    public init(proposal: PythonEditProposal, message: String? = nil) {
+        self.proposal = proposal
+        self.message = message
+    }
+}
+
+public struct PythonEditRequest: Codable, Equatable, Sendable {
+    public let instruction: String
+    public let scope: PythonEditScope
+    public let context: ActivePythonEditContext
+
+    public init(instruction: String, scope: PythonEditScope, context: ActivePythonEditContext) {
+        self.instruction = instruction
+        self.scope = scope
+        self.context = context
+    }
+}
+
+public struct PythonEditRequestResult: Codable, Equatable, Sendable {
+    public let proposalId: String
+    public let state: PythonEditProposalState
+
+    public init(proposalId: String, state: PythonEditProposalState) {
+        self.proposalId = proposalId
+        self.state = state
+    }
+}
+
+public struct PythonEditDecision: Codable, Equatable, Sendable {
+    public let proposalId: String
+    public let decision: PythonEditProposalState
+
+    public init(proposalId: String, decision: PythonEditProposalState) {
+        self.proposalId = proposalId
+        self.decision = decision
     }
 }
 

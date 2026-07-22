@@ -1,9 +1,34 @@
 :root {
+  color-scheme: light;
+  --surface: #ffffff;
+  --surface-subtle: #fafafb;
+  --surface-muted: #f5f5f6;
+  --surface-hover: #f0f1f3;
+  --border: #e5e7eb;
+  --text: #202124;
+  --text-muted: #686d75;
+  --accent-soft: #e8f1ff;
+  --accent-text: #1e4f8b;
   color: #202124;
   background: #ffffff;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --surface: #18191b;
+  --surface-subtle: #1f2023;
+  --surface-muted: #26282c;
+  --surface-hover: #2c2e33;
+  --border: #34363c;
+  --text: #e8e9eb;
+  --text-muted: #a4a8b0;
+  --accent-soft: #24364f;
+  --accent-text: #a9ceff;
+  color: var(--text);
+  background: var(--surface);
 }
 
 * {
@@ -35,21 +60,22 @@ select:focus-visible {
 }
 
 .ide-shell {
-  display: grid;
-  grid-template-rows: 46px auto minmax(0, 1fr);
+  display: flex;
+  flex-direction: column;
   width: 100%;
   height: 100%;
-  background: #ffffff;
+  background: var(--surface);
 }
 
 .titlebar {
+  flex: 0 0 46px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   min-width: 0;
   padding: 0 10px 0 14px;
-  border-bottom: 1px solid #e5e7eb;
-  background: #fbfbfc;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-subtle);
   -webkit-app-region: drag;
 }
 
@@ -164,7 +190,7 @@ select:focus-visible {
 
 .workspace-grid {
   display: grid;
-  grid-row: -2 / -1;
+  flex: 1 1 auto;
   grid-template-columns: 218px minmax(0, 1fr);
   min-height: 0;
 }
@@ -172,8 +198,8 @@ select:focus-visible {
 .file-tree {
   min-width: 0;
   overflow: auto;
-  border-right: 1px solid #e5e7eb;
-  background: #fafafb;
+  border-right: 1px solid var(--border);
+  background: var(--surface-subtle);
 }
 
 .panel-heading {
@@ -360,6 +386,10 @@ select:focus-visible {
   min-height: 0;
 }
 
+.editor-pane-with-proposal {
+  grid-template-rows: 36px auto minmax(0, 1fr);
+}
+
 .editor-tabs {
   display: flex;
   align-items: stretch;
@@ -471,6 +501,144 @@ select:focus-visible {
 
 .selection-trigger:hover {
   background: #f8f8f9;
+}
+
+.selection-edit-trigger {
+  border-color: #447fc3;
+  background: #447fc3;
+  color: #ffffff;
+}
+
+.selection-edit-trigger:hover {
+  background: #356da9;
+}
+
+.time-theme-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.edit-request-bar,
+.proposal-bar {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 8px;
+  min-height: 42px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-subtle);
+  color: var(--text);
+  font-size: 12px;
+}
+
+.edit-request-bar label {
+  flex: 0 0 auto;
+  font-weight: 600;
+}
+
+.edit-request-bar textarea {
+  flex: 1;
+  min-width: 120px;
+  height: 30px;
+  resize: none;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  outline: 0;
+  background: var(--surface);
+  color: var(--text);
+  font: 12px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.edit-request-bar textarea:focus {
+  border-color: #5a9bf6;
+  box-shadow: 0 0 0 2px rgb(90 155 246 / 18%);
+}
+
+.edit-request-bar button,
+.proposal-bar button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 28px;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.edit-request-bar button[type="submit"],
+.proposal-ready button:first-of-type {
+  border-color: #3d7fc5;
+  background: #3d7fc5;
+  color: #ffffff;
+}
+
+.proposal-bar span {
+  flex: 1;
+}
+
+.proposal-generating {
+  border-color: #d9c8f2;
+  background: #f8f4ff;
+  color: #644a8d;
+}
+
+.proposal-ready {
+  border-color: #bad8c0;
+  background: #f1faf3;
+  color: #316c3d;
+}
+
+.proposal-stale {
+  border-color: #ead3a2;
+  background: #fff9eb;
+  color: #80601d;
+}
+
+.proposal-spinner {
+  animation: proposal-spin 0.9s linear infinite;
+}
+
+@keyframes proposal-spin {
+  to { transform: rotate(360deg); }
+}
+
+.codex-edit-removed {
+  background: rgb(211 70 70 / 16%);
+  text-decoration: line-through;
+  text-decoration-color: rgb(165 45 45 / 70%);
+}
+
+.codex-edit-added-zone {
+  height: 100%;
+  overflow: auto;
+  border-top: 1px solid rgb(54 139 81 / 35%);
+  border-bottom: 1px solid rgb(54 139 81 / 35%);
+  background: rgb(66 158 91 / 12%);
+  color: var(--text);
+  font: 12px/21px SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.codex-edit-added-zone pre {
+  margin: 0;
+  padding: 3px 12px 8px 54px;
+  white-space: pre;
+}
+
+.codex-edit-added-label {
+  padding: 3px 12px 0 54px;
+  color: #3e8a53;
+  font: 10px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-weight: 650;
+  text-transform: uppercase;
 }
 
 
@@ -630,6 +798,99 @@ select:focus-visible {
   background: #f1f2f4;
   color: #44484e;
   font-family: SFMono-Regular, Menlo, monospace;
+}
+
+:root[data-theme="dark"] .titlebar-actions select,
+:root[data-theme="dark"] .titlebar-actions button,
+:root[data-theme="dark"] .tree-create-form,
+:root[data-theme="dark"] .tree-create-form button,
+:root[data-theme="dark"] .editor-tab-active,
+:root[data-theme="dark"] .selection-trigger,
+:root[data-theme="dark"] .output-content,
+:root[data-theme="dark"] .diagnostic-row {
+  border-color: var(--border);
+  background: var(--surface);
+  color: var(--text);
+}
+
+:root[data-theme="dark"] .titlebar-actions .run-button,
+:root[data-theme="dark"] .selection-edit-trigger {
+  border-color: #71a9ed;
+  background: #3b76b9;
+  color: #ffffff;
+}
+
+:root[data-theme="dark"] .editor-tabs,
+:root[data-theme="dark"] .output-panel,
+:root[data-theme="dark"] .output-heading {
+  border-color: var(--border);
+  background: var(--surface-subtle);
+  color: var(--text-muted);
+}
+
+:root[data-theme="dark"] .editor-tab {
+  border-color: var(--border);
+  background: var(--surface-muted);
+  color: var(--text-muted);
+}
+
+:root[data-theme="dark"] .editor-tab-active {
+  background: var(--surface);
+  color: var(--text);
+}
+
+:root[data-theme="dark"] .editor-canvas,
+:root[data-theme="dark"] .output-content pre {
+  background: var(--surface);
+  color: var(--text);
+}
+
+:root[data-theme="dark"] .tree-row,
+:root[data-theme="dark"] .panel-heading,
+:root[data-theme="dark"] .diagnostic-row span:last-child {
+  color: var(--text-muted);
+}
+
+:root[data-theme="dark"] .tree-row-wrap:hover,
+:root[data-theme="dark"] .tab-close:hover,
+:root[data-theme="dark"] .selection-trigger:hover {
+  background: var(--surface-hover);
+}
+
+:root[data-theme="dark"] .tree-row-wrap.tree-row-active,
+:root[data-theme="dark"] .tree-row-wrap.tree-row-active:hover {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+
+:root[data-theme="dark"] .proposal-generating {
+  border-color: #57456f;
+  background: #2a2335;
+  color: #d7c2f2;
+}
+
+:root[data-theme="dark"] .proposal-ready {
+  border-color: #365b40;
+  background: #1f3024;
+  color: #a9d8b4;
+}
+
+:root[data-theme="dark"] .proposal-stale {
+  border-color: #67552d;
+  background: #342d1e;
+  color: #dfc47e;
+}
+
+:root[data-theme="dark"] .notice-bar {
+  border-color: #334d70;
+  background: #202d40;
+  color: #b8d4fa;
+}
+
+:root[data-theme="dark"] .notice-error {
+  border-color: #704343;
+  background: #3a2424;
+  color: #f0b3b3;
 }
 
 @media (max-width: 900px) {

@@ -9,6 +9,7 @@ public actor PythonService {
     private var eventHandler: EventHandler?
     private var outputByRun: [String: String] = [:]
     private var activeRunIDs: Set<String> = []
+    private var notificationHandlerID: UUID?
 
     public init(client: AppServerClient, workspace: WorkspaceService) {
         self.client = client
@@ -16,7 +17,7 @@ public actor PythonService {
     }
 
     public func start() async throws {
-        await client.setNotificationHandler { [weak self] method, params in
+        notificationHandlerID = await client.addNotificationHandler { [weak self] method, params in
             Task { await self?.handleNotification(method: method, params: params) }
         }
         try await client.start()
@@ -129,6 +130,10 @@ public actor PythonService {
     public func stop() async {
         for runID in activeRunIDs {
             try? await terminate(runID: runID)
+        }
+        if let notificationHandlerID {
+            await client.removeNotificationHandler(notificationHandlerID)
+            self.notificationHandlerID = nil
         }
         await client.stop()
     }

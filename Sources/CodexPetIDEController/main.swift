@@ -1,7 +1,13 @@
 import AppKit
+import CodexPetIDECore
+import Foundation
 
-let application = NSApplication.shared
-let delegate = MainActor.assumeIsolated { AppDelegate() }
-application.delegate = delegate
-application.setActivationPolicy(.accessory)
-application.run()
+if CommandLine.arguments.contains("--mcp-stdio") {
+    MCPStdioServer.run()
+} else {
+    let application = NSApplication.shared
+    let delegate = MainActor.assumeIsolated { AppDelegate() }
+    application.delegate = delegate
+    application.setActivationPolicy(.accessory)
+    application.run()
+}

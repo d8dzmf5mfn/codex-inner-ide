@@ -8,6 +8,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var terminationInFlight = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        coordinator.startLocalBridge()
         let status = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         status.button?.image = NSImage(
             systemSymbolName: "chevron.left.forwardslash.chevron.right",

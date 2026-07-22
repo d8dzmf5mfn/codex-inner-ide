@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "codex-inner-edit": {
+      "command": "./bin/codex-inner-edit-mcp",
+      "args": [],
+      "cwd": "."
+    }
+  }
+}

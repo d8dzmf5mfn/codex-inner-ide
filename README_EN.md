@@ -14,12 +14,14 @@ A local macOS extension that injects an `IDE` entry below `Files` in Codex and o
 - Python execution through the bundled Codex `command/exec` with `workspaceWrite`, a single writable root, and network access disabled.
 - `Add to chat` fills the bound Codex task composer; `More details` fills ChatGPT Quick Chat. Neither action sends automatically.
 - Quick Chat first uses the official `⌘⌥N` shortcut, then a version-bound UI signal, and finally a clipboard fallback.
+- The `Codex Inner Edit` plugin generates an isolated read-only proposal for the active Python selection or file. `Enter` changes only the Monaco buffer, `Esc` rejects it, and `⌘S` writes it to disk.
+- The IDE follows local time automatically: light from 07:00–18:59 and dark from 19:00–06:59, including Monaco, the file tree, diffs, and Problems.
 
 The preview does not include Side Chat, Review, an interactive terminal, Git UI, LSP, a debugger, notebooks, or AI autocomplete.
 
 ## Download
 
-- [Codex Inner IDE v0.2.1 Preview](https://github.com/d8dzmf5mfn/codex-inner-ide/releases/tag/v0.2.1-preview)
+- [Codex Inner IDE v0.3.0 Preview](https://github.com/d8dzmf5mfn/codex-inner-ide/releases/tag/v0.3.0-preview)
 - The current build supports Apple Silicon Macs running macOS 14 or newer.
 - Download both the ZIP and `.sha256` file and verify the checksum before installing.
 
@@ -38,8 +40,9 @@ Requirements:
 Outputs:
 
 - Installed and launched app: `~/Applications/Codex Inner IDE.app`
-- Distribution archive: `dist/Codex Inner IDE-v0.2.1-macos-arm64.zip`
-- Checksum file: `dist/Codex Inner IDE-v0.2.1-macos-arm64.zip.sha256`
+- Distribution archive: `dist/Codex Inner IDE-v0.3.0-macos-arm64.zip`
+- Checksum file: `dist/Codex Inner IDE-v0.3.0-macos-arm64.zip.sha256`
+- Plugin archive: `dist/codex-inner-edit-v0.1.0.zip`
 
 Build the distribution archive without replacing the current installation:
 
@@ -54,6 +57,17 @@ Build the distribution archive without replacing the current installation:
 3. This preview is ad-hoc signed and has not been signed with a Developer ID or notarized by Apple. macOS may block the first launch. Only if you trust the download source and the digest matches, right-click the app in Finder and choose **Open**, or build it from source.
 
 When Codex Sidepanel and chat integration is enabled for the first time, the controller asks for confirmation before relaunching Codex and listens only on a random `127.0.0.1` CDP port. Choosing **Open IDE Only** keeps editing and Python execution available, but disables Sidepanel injection and chat handoff.
+
+### Install the Codex Inner Edit plugin
+
+The source repository includes a repo-local marketplace. Register and install it with:
+
+```bash
+codex plugin marketplace add "/path/to/codex-inner-ide"
+codex plugin add codex-inner-edit@codex-inner-ide
+```
+
+The plugin connects to the installed app through its `--mcp-stdio` mode. It does not require Node, Python, an HTTP service, or an API key. Start a new Codex task after installing or updating it so the Skill and MCP tools are reloaded.
 
 ## Tests
 
@@ -79,6 +93,6 @@ Unknown versions can still open the IDE from the menu bar, but Sidepanel injecti
 
 ## Distribution Status
 
-- `v0.2.1` is an Apple Silicon preview, not a notarized production release.
+- `v0.3.0` is an Apple Silicon preview, not a notarized production release.
 - The current build machine has no usable Apple Developer ID, so the Release ZIP retains an ad-hoc signature.
 - See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for bundled third-party components and licenses.

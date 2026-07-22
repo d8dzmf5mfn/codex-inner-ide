@@ -14,12 +14,14 @@ macOS 本地扩展：在 Codex `Files` 下方注入 `IDE` 入口，并由现有�
 - Python 通过 bundled Codex `command/exec` 运行，固定 `workspaceWrite`、唯一 writable root、禁网。
 - `Add to chat` 预填绑定的 Codex task；`More details` 预填 ChatGPT Quick Chat；两者都不会自动发送。
 - Quick Chat 优先使用官方 `⌘⌥N`，失败后使用版本绑定的 UI signal，最后回退到剪贴板。
+- `Codex Inner Edit` 插件可为当前 Python 选区或文件生成独立只读修改提案；`Enter` 只应用到 Monaco 缓冲区，`Esc` 拒绝，`⌘S` 才写入磁盘。
+- IDE 按本地时间自动变色：07:00–18:59 浅色，19:00–06:59 深色，Monaco、文件树、Diff 和 Problems 同步切换。
 
 不包含 Side Chat、Review、交互式 Terminal、Git、LSP、Debugger、Notebook 或 AI 补全。
 
 ## 下载
 
-- [Codex Inner IDE v0.2.1 Preview](https://github.com/d8dzmf5mfn/codex-inner-ide/releases/tag/v0.2.1-preview)
+- [Codex Inner IDE v0.3.0 Preview](https://github.com/d8dzmf5mfn/codex-inner-ide/releases/tag/v0.3.0-preview)
 - 当前提供 Apple Silicon、macOS 14+ 构建。
 - 下载 ZIP 和 `.sha256` 文件后，请先核对摘要。
 
@@ -38,8 +40,9 @@ macOS 本地扩展：在 Codex `Files` 下方注入 `IDE` 入口，并由现有�
 输出：
 
 - 安装并启动：`~/Applications/Codex Inner IDE.app`
-- 分发包：`dist/Codex Inner IDE-v0.2.1-macos-arm64.zip`
-- 校验文件：`dist/Codex Inner IDE-v0.2.1-macos-arm64.zip.sha256`
+- 分发包：`dist/Codex Inner IDE-v0.3.0-macos-arm64.zip`
+- 校验文件：`dist/Codex Inner IDE-v0.3.0-macos-arm64.zip.sha256`
+- 插件包：`dist/codex-inner-edit-v0.1.0.zip`
 
 只生成分发包、不替换当前安装：
 
@@ -54,6 +57,17 @@ macOS 本地扩展：在 Codex `Files` 下方注入 `IDE` 入口，并由现有�
 3. 当前 Preview 使用 ad-hoc 签名，尚未使用 Developer ID 签名或 Apple notarization。macOS 可能阻止首次启动；只在你信任下载来源且摘要一致时，通过 Finder 右键选择 **Open**，或自行从源码构建。
 
 首次建立 Codex Sidepanel/聊天集成时，控制器会要求用户确认重启 Codex，并仅监听随机的 `127.0.0.1` CDP 端口。选择 **Open IDE Only** 仍可编辑和运行 Python，但不会注入 Sidepanel 或执行聊天交接。
+
+### 安装 Codex Inner Edit 插件
+
+源码仓库包含 repo-local Marketplace。注册并安装：
+
+```bash
+codex plugin marketplace add "/path/to/codex-inner-ide"
+codex plugin add codex-inner-edit@codex-inner-ide
+```
+
+插件通过已安装 App 的 `--mcp-stdio` 模式连接本机 IDE，不需要 Node、Python、HTTP 服务或 API Key。安装或更新后请新建 Codex task 以加载 Skill 和 MCP 工具。
 
 ## 测试
 
@@ -79,6 +93,6 @@ Swift 集成测试调用 `/Applications/ChatGPT.app/Contents/Resources/codex app
 
 ## 分发状态
 
-- `v0.2.1` 是 Apple Silicon preview，不是已公证的正式版本。
+- `v0.3.0` 是 Apple Silicon preview，不是已公证的正式版本。
 - 当前机器没有可用的 Apple Developer ID；Release ZIP 会保留 ad-hoc 签名。
 - 第三方组件及许可证见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。

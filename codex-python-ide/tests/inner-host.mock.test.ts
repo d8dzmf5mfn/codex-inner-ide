@@ -52,4 +52,21 @@ describe("development Inner IDE host", () => {
       submitted: false
     });
   });
+
+  it("emits a read-only Python proposal without writing the mock file", async () => {
+    const host = createMockInnerHost();
+    const before = await host.files.read("main.py");
+    const proposals: string[] = [];
+    host.edits.subscribe((event) => proposals.push(event.proposal.state));
+
+    const started = await host.edits.request({ instruction: "Add a comment", scope: "file" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(started.state).toBe("generating");
+    expect(proposals).toContain("ready");
+    await expect(host.files.read("main.py")).resolves.toMatchObject({
+      content: before.content,
+      digest: before.digest
+    });
+  });
 });

@@ -1,0 +1,29 @@
+{
+  "name": "codex-inner-edit",
+  "version": "0.1.0",
+  "description": "Generate read-only Python edit proposals for explicit Enter approval in Codex Inner IDE.",
+  "author": {
+    "name": "d8dzmf5mfn",
+    "url": "https://github.com/d8dzmf5mfn"
+  },
+  "homepage": "https://github.com/d8dzmf5mfn/codex-inner-ide",
+  "repository": "https://github.com/d8dzmf5mfn/codex-inner-ide",
+  "license": "MIT",
+  "keywords": ["python", "editor", "monaco", "diff", "approval"],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Codex Inner Edit",
+    "shortDescription": "Propose Python edits for Enter approval in Inner IDE.",
+    "longDescription": "Connects Codex to the active Python buffer in Codex Inner IDE, creates a read-only proposal, and waits for the user to accept it with Enter. Source code is not returned to the originating task.",
+    "developerName": "d8dzmf5mfn",
+    "category": "Productivity",
+    "capabilities": ["Interactive"],
+    "websiteURL": "https://github.com/d8dzmf5mfn/codex-inner-ide",
+    "defaultPrompt": [
+      "Optimize the selected Python code in Codex Inner IDE.",
+      "Fix the active Python file and show an approval diff.",
+      "Refactor the current Python selection without saving it."
+    ]
+  },
+  "mcpServers": "./.mcp.json"
+}

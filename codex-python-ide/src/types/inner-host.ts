@@ -63,6 +63,43 @@ export type SelectionRange = {
   endColumn: number;
 };
 
+export type PythonEditScope = "auto" | "selection" | "file";
+export type PythonEditProposalState =
+  | "generating"
+  | "ready"
+  | "stale"
+  | "accepted"
+  | "rejected"
+  | "failed";
+
+export type ActivePythonEditContext = {
+  workspaceId: string;
+  relativePath: string;
+  scope: PythonEditScope;
+  range?: SelectionRange | null;
+  bufferContent: string;
+  bufferDigest: string;
+  instruction: string;
+  readonly: boolean;
+};
+
+export type PythonEditProposal = {
+  proposalId: string;
+  workspaceId: string;
+  relativePath: string;
+  scope: Exclude<PythonEditScope, "auto">;
+  range?: SelectionRange | null;
+  baseBufferDigest: string;
+  summary: string;
+  replacementText: string;
+  state: PythonEditProposalState;
+};
+
+export type PythonEditProposalEvent = {
+  proposal: PythonEditProposal;
+  message?: string | null;
+};
+
 export type IdeSelectionContext = {
   workspaceId: string;
   relativePath: string;
@@ -125,6 +162,15 @@ export interface CodexInnerIdeHostV1 {
   chatgpt: {
     moreDetails(context: IdeSelectionContext): Promise<HandoffResult>;
   };
+  edits: {
+    request(request: {
+      instruction: string;
+      scope: PythonEditScope;
+    }): Promise<{ proposalId: string; state: PythonEditProposalState }>;
+    cancel(proposalId: string): Promise<{ cancelled: boolean }>;
+    decide(proposalId: string, decision: "accepted" | "rejected" | "stale"): Promise<void>;
+    subscribe(listener: (event: PythonEditProposalEvent) => void): Unsubscribe;
+  };
   window: {
     setDirty(dirty: boolean): void;
     loadState(): Promise<IdeWindowState | null>;
@@ -138,5 +184,9 @@ declare global {
     codexInnerIdeHost?: { v1?: CodexInnerIdeHostV1 };
     __codexInnerIdeReactRoot?: { unmount(): void };
     __codexInnerIdeRequestSaveAll?: () => Promise<boolean>;
+    __codexInnerIdeGetActiveEditContext?: (
+      instruction: string,
+      scope: PythonEditScope
+    ) => Promise<ActivePythonEditContext | null>;
   }
 }

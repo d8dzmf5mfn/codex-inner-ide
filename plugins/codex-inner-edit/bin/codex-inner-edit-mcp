@@ -1,0 +1,27 @@
+#!/bin/sh
+set -eu
+
+resolve_binary() {
+  candidate="$1"
+  if [ -d "$candidate" ]; then
+    candidate="$candidate/Contents/MacOS/CodexPetIDEController"
+  fi
+  if [ -x "$candidate" ]; then
+    printf '%s\n' "$candidate"
+    return 0
+  fi
+  return 1
+}
+
+if [ -n "${CODEX_INNER_IDE_APP:-}" ]; then
+  binary="$(resolve_binary "$CODEX_INNER_IDE_APP" || true)"
+  if [ -n "$binary" ]; then exec "$binary" --mcp-stdio; fi
+fi
+
+for app in "$HOME/Applications/Codex Inner IDE.app" "/Applications/Codex Inner IDE.app"; do
+  binary="$(resolve_binary "$app" || true)"
+  if [ -n "$binary" ]; then exec "$binary" --mcp-stdio; fi
+done
+
+echo "Codex Inner IDE is not installed. Install it in ~/Applications or /Applications, or set CODEX_INNER_IDE_APP." >&2
+exit 1
