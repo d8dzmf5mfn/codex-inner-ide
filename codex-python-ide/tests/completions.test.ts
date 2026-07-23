@@ -5,6 +5,7 @@ import {
   completionPrefixAt,
   completionIndex,
   extractSymbols,
+  isNoSuggestionsWidget,
   registerCompletionProviders,
   setUserCompletionSnippets,
   shouldSkipIndexedDirectory
@@ -183,6 +184,19 @@ describe("language-aware completions", () => {
       getValue: () => ""
     }, { lineNumber: 1, column: 14 });
     expect(result).toEqual({ incomplete: false, suggestions: [] });
+  });
+
+  it("recognizes only the empty suggestion message for immediate dismissal", () => {
+    const root = document.createElement("div");
+    root.innerHTML = '<div class="suggest-widget message"><div class="message">No suggestions.</div></div>';
+    expect(isNoSuggestionsWidget(root)).toBe(true);
+
+    root.querySelector(".suggest-widget > .message")!.textContent = "Loading...";
+    expect(isNoSuggestionsWidget(root)).toBe(false);
+
+    root.querySelector(".suggest-widget")!.classList.remove("message");
+    root.querySelector(".suggest-widget > .message")!.textContent = "No suggestions.";
+    expect(isNoSuggestionsWidget(root)).toBe(false);
   });
 
   it("recognizes prefixes that Monaco does not treat as plain words", () => {

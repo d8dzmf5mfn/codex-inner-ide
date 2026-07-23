@@ -13,6 +13,16 @@ export const COMPLETION_TAB_PRECONDITION = "suggestWidgetVisible && editorTextFo
 export const MAX_INDEXED_FILES = 1_500;
 export const MAX_INDEXED_CHARACTERS = 500_000;
 
+export function isNoSuggestionsWidget(root: ParentNode): boolean {
+  const message = root
+    .querySelector(".suggest-widget.message .message")
+    ?.textContent
+    ?.trim()
+    .replace(/\.$/, "")
+    .toLowerCase();
+  return message === "no suggestions";
+}
+
 export function completionPrefixAt(line: string, column: number): string {
   return line.slice(0, Math.max(0, column - 1)).match(/[@$A-Za-z_][\w$@-]*$/)?.[0] ?? "";
 }

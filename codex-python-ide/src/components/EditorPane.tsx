@@ -2,7 +2,11 @@ import { useEffect, useRef, useState } from "react";
 import Editor, { type OnMount } from "@monaco-editor/react";
 import { Check, LoaderCircle, RotateCcw, Sparkles, X } from "lucide-react";
 import { digestText, previewLines } from "../core/edits";
-import { COMPLETION_TAB_PRECONDITION, completionPrefixAt } from "../core/completions";
+import {
+  COMPLETION_TAB_PRECONDITION,
+  completionPrefixAt,
+  isNoSuggestionsWidget
+} from "../core/completions";
 import { languageForPath, supportsCodexEdit } from "../core/languages";
 import type {
   Diagnostic,
@@ -201,6 +205,21 @@ export function EditorPane({
       editor.onDidScrollChange(saveView);
       editor.onDidChangeCursorPosition(saveView);
     }
+    const editorNode = editor.getDomNode();
+    const emptySuggestionObserver = new MutationObserver(() => {
+      if (editorNode && isNoSuggestionsWidget(editorNode)) {
+        editor.trigger("codex-inner-ide", "hideSuggestWidget", {});
+      }
+    });
+    if (editorNode) {
+      emptySuggestionObserver.observe(editorNode, {
+        attributes: true,
+        attributeFilter: ["class"],
+        characterData: true,
+        childList: true,
+        subtree: true
+      });
+    }
     let completionTimer: number | null = null;
     editor.onDidChangeModelContent((event) => {
       if (event.isFlush || event.changes.some((change) => change.text.length > 1)) return;
@@ -216,6 +235,7 @@ export function EditorPane({
     });
     editor.onDidDispose(() => {
       if (completionTimer !== null) window.clearTimeout(completionTimer);
+      emptySuggestionObserver.disconnect();
     });
     editor.addAction({
       id: "codex-inner-ide.accept-completion",
