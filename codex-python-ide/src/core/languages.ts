@@ -38,17 +38,44 @@ export const LANGUAGE_DEFINITIONS = [
 ] as const satisfies readonly LanguageDefinition[];
 
 const plainText = LANGUAGE_DEFINITIONS.find((definition) => definition.id === "plaintext")!;
+const languagesById = new Map(
+  LANGUAGE_DEFINITIONS.map((definition) => [definition.id, definition] as const)
+);
 const languagesByExtension = new Map(
   LANGUAGE_DEFINITIONS.flatMap((definition) =>
     definition.extensions.map((extension) => [extension, definition] as const)
   )
 );
 
-export function languageForPath(relativePath: string): LanguageDefinition {
+export function languageForId(id: LanguageId): LanguageDefinition {
+  return languagesById.get(id) ?? plainText;
+}
+
+export function registeredLanguageForPath(relativePath: string): LanguageDefinition | null {
   const filename = relativePath.split(/[\\/]/).at(-1)?.toLowerCase() ?? "";
   const dot = filename.lastIndexOf(".");
-  if (dot <= 0) return plainText;
-  return languagesByExtension.get(filename.slice(dot)) ?? plainText;
+  if (dot <= 0) return null;
+  return languagesByExtension.get(filename.slice(dot)) ?? null;
+}
+
+export function languageForPath(relativePath: string): LanguageDefinition {
+  return registeredLanguageForPath(relativePath) ?? plainText;
+}
+
+export function resolveNewFileName(
+  fileName: string,
+  languageId: LanguageId
+): { fileName: string; appendedDefaultExtension: boolean } {
+  const explicitDotfile = fileName.startsWith(".");
+  const dot = fileName.lastIndexOf(".");
+  const hasExtension = dot > 0 && dot < fileName.length - 1;
+  if (explicitDotfile || hasExtension) {
+    return { fileName, appendedDefaultExtension: false };
+  }
+  return {
+    fileName: `${fileName}${languageForId(languageId).defaultExtension}`,
+    appendedDefaultExtension: true
+  };
 }
 
 export function supportsPythonExecution(relativePath: string): boolean {

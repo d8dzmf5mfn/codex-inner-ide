@@ -12,7 +12,14 @@ import {
   Pencil,
   Trash2
 } from "lucide-react";
-import { languageForPath } from "../core/languages";
+import {
+  LANGUAGE_DEFINITIONS,
+  languageForId,
+  languageForPath,
+  registeredLanguageForPath,
+  resolveNewFileName,
+  type LanguageId
+} from "../core/languages";
 import type { FileEntry, FileKind } from "../types/inner-host";
 
 type FileTreeProps = {
@@ -48,6 +55,7 @@ export function FileTree({
   const [selectedDirectory, setSelectedDirectory] = useState("");
   const [createKind, setCreateKind] = useState<FileKind | null>(null);
   const [createName, setCreateName] = useState("");
+  const [createLanguageId, setCreateLanguageId] = useState<LanguageId>("python");
 
   useEffect(() => {
     setChildren((current) => ({ ...current, "": rootEntries }));
@@ -80,6 +88,9 @@ export function FileTree({
   const beginCreate = (kind: FileKind) => {
     setCreateKind(kind);
     setCreateName("");
+    if (kind === "file") {
+      setCreateLanguageId(activePath ? languageForPath(activePath).id : "python");
+    }
   };
 
   const cancelCreate = () => {
@@ -91,11 +102,23 @@ export function FileTree({
     event.preventDefault();
     if (!createKind) return;
     const name = createName.trim();
-    if (!name || name.includes("/") || name === "." || name === "..") {
+    if (!name || name.includes("/") || name === "." || name === ".." || name.endsWith(".")) {
       onError(new Error("Enter a valid name without path separators."));
       return;
     }
-    const path = selectedDirectory ? `${selectedDirectory}/${name}` : name;
+    const resolved = createKind === "file"
+      ? resolveNewFileName(name, createLanguageId)
+      : { fileName: name, appendedDefaultExtension: false };
+    if (resolved.appendedDefaultExtension) {
+      const language = languageForId(createLanguageId);
+      const confirmed = window.confirm(
+        `"${name}" has no extension. Create "${resolved.fileName}" as ${language.label}?`
+      );
+      if (!confirmed) return;
+    }
+    const path = selectedDirectory
+      ? `${selectedDirectory}/${resolved.fileName}`
+      : resolved.fileName;
     try {
       await onCreate(path, createKind);
       cancelCreate();
@@ -119,17 +142,39 @@ export function FileTree({
       </div>
       {createKind && (
         <form className="tree-create-form" aria-label={createKind === "file" ? "Create file" : "Create folder"} onSubmit={(event) => void create(event)}>
-          <label htmlFor="tree-create-name">{createKind === "file" ? "New file" : "New folder"}</label>
+          <label htmlFor="tree-create-name">{createKind === "file" ? "File name" : "Folder name"}</label>
           <input
             id="tree-create-name"
             aria-label={createKind === "file" ? "File name" : "Folder name"}
             autoFocus
             value={createName}
-            onChange={(event) => setCreateName(event.target.value)}
+            onChange={(event) => {
+              const next = event.target.value;
+              setCreateName(next);
+              const detected = registeredLanguageForPath(next);
+              if (detected) setCreateLanguageId(detected.id);
+            }}
             onKeyDown={(event) => { if (event.key === "Escape") cancelCreate(); }}
-            placeholder={createKind === "file" ? "example.py" : "folder-name"}
+            placeholder={createKind === "file"
+              ? `example${languageForId(createLanguageId).defaultExtension}`
+              : "folder-name"}
           />
-          <div>
+          {createKind === "file" && (
+            <>
+              <label htmlFor="tree-create-language">Language</label>
+              <select
+                id="tree-create-language"
+                aria-label="File language"
+                value={createLanguageId}
+                onChange={(event) => setCreateLanguageId(event.target.value as LanguageId)}
+              >
+                {LANGUAGE_DEFINITIONS.map((language) => (
+                  <option key={language.id} value={language.id}>{language.label}</option>
+                ))}
+              </select>
+            </>
+          )}
+          <div className="tree-create-actions">
             <button type="submit">Create</button>
             <button type="button" onClick={cancelCreate}>Cancel</button>
           </div>

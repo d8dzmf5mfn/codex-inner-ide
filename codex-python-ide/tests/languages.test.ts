@@ -3,6 +3,8 @@ import {
   LANGUAGE_DEFINITIONS,
   languageForPath,
   preferredInitialFilePath,
+  registeredLanguageForPath,
+  resolveNewFileName,
   selectionLanguageForPath,
   supportsCodexEdit,
   supportsPythonExecution
@@ -44,6 +46,27 @@ describe("language registry", () => {
   it("uses real language ids for handoff and text for unknown files", () => {
     expect(selectionLanguageForPath("src/App.ts")).toBe("typescript");
     expect(selectionLanguageForPath("LICENSE")).toBe("text");
+  });
+
+  it("resolves recognized extensions without treating unknown files as registered", () => {
+    expect(registeredLanguageForPath("src/App.tsx")?.id).toBe("typescript");
+    expect(registeredLanguageForPath("notes.custom")).toBeNull();
+    expect(registeredLanguageForPath(".gitignore")).toBeNull();
+  });
+
+  it("adds the selected language suffix only when a file has no explicit extension", () => {
+    expect(resolveNewFileName("Main", "java")).toEqual({
+      fileName: "Main.java",
+      appendedDefaultExtension: true
+    });
+    expect(resolveNewFileName("index.html", "typescript")).toEqual({
+      fileName: "index.html",
+      appendedDefaultExtension: false
+    });
+    expect(resolveNewFileName(".gitignore", "python")).toEqual({
+      fileName: ".gitignore",
+      appendedDefaultExtension: false
+    });
   });
 
   it("preserves Python preference, then opens the first recognized language", () => {

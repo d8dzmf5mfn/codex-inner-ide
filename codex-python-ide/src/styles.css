@@ -272,7 +272,8 @@ select:focus-visible {
   font-weight: 600;
 }
 
-.tree-create-form input {
+.tree-create-form input,
+.tree-create-form select {
   min-width: 0;
   height: 27px;
   padding: 0 7px;
@@ -282,12 +283,18 @@ select:focus-visible {
   font: 12px ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
-.tree-create-form input:focus {
+.tree-create-form select {
+  width: 100%;
+  background: #fff;
+}
+
+.tree-create-form input:focus,
+.tree-create-form select:focus {
   border-color: #6095d5;
   box-shadow: 0 0 0 2px rgb(96 149 213 / 18%);
 }
 
-.tree-create-form > div {
+.tree-create-actions {
   display: flex;
   justify-content: flex-end;
   gap: 5px;
@@ -815,6 +822,7 @@ select:focus-visible {
 :root[data-theme="dark"] .titlebar-actions select,
 :root[data-theme="dark"] .titlebar-actions button,
 :root[data-theme="dark"] .tree-create-form,
+:root[data-theme="dark"] .tree-create-form select,
 :root[data-theme="dark"] .tree-create-form button,
 :root[data-theme="dark"] .editor-tab-active,
 :root[data-theme="dark"] .selection-trigger,
