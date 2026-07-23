@@ -64,6 +64,15 @@ export function useRuntimeExecution(host: CodexInnerIdeHostV1) {
     setExitCode(null);
   }, []);
 
+  const reset = useCallback(() => {
+    setRunning(false);
+    setRunId(null);
+    setLanguageId(null);
+    setOutput("");
+    setDiagnostics([]);
+    setExitCode(null);
+  }, []);
+
   return {
     running,
     runId,
@@ -74,7 +83,8 @@ export function useRuntimeExecution(host: CodexInnerIdeHostV1) {
     execute,
     stop,
     check,
-    clear
+    clear,
+    reset
   };
 }
 

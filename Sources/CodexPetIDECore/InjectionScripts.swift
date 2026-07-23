@@ -219,7 +219,11 @@ public enum InjectionScripts {
             apiVersion: '1',
             workspace: {
               current: () => call('workspace.current'),
-              choose: () => call('workspace.choose')
+              choose: () => call('workspace.choose'),
+              recent: () => call('workspace.recent'),
+              openRecent: (id) => call('workspace.openRecent', { id }),
+              removeRecent: (id) => call('workspace.removeRecent', { id }),
+              relocateRecent: (id) => call('workspace.relocateRecent', { id })
             },
             files: {
               list: (path = '') => call('files.list', { relativePath: path }),

@@ -10,8 +10,10 @@ import type {
   PythonExecutionEvent,
   PythonEditProposalEvent,
   PythonInterpreter,
+  RecentWorkspace,
   RuntimeDescriptor,
-  RuntimeExecutionEvent
+  RuntimeExecutionEvent,
+  WorkspaceBinding
 } from "../types/inner-host";
 
 const initialFiles: Record<string, string> = {
@@ -99,7 +101,23 @@ export function createMockInnerHost(): CodexInnerIdeHostV1 {
   const pythonListeners = new Set<(event: PythonExecutionEvent) => void>();
   const runtimeListeners = new Set<(event: RuntimeExecutionEvent) => void>();
   const editListeners = new Set<(event: PythonEditProposalEvent) => void>();
-  let state: IdeWindowState | null = null;
+  const primaryWorkspace: WorkspaceBinding = {
+    id: "mock-workspace",
+    name: "python-example",
+    rootLabel: "demo/python-example"
+  };
+  const secondaryWorkspace: WorkspaceBinding = {
+    id: "mock-secondary",
+    name: "web-example",
+    rootLabel: "demo/web-example"
+  };
+  let currentWorkspace = primaryWorkspace;
+  let recentWorkspaces: RecentWorkspace[] = [
+    { ...primaryWorkspace, available: true },
+    { ...secondaryWorkspace, available: true },
+    { id: "mock-missing", name: "missing-example", rootLabel: "demo/missing-example", available: false }
+  ];
+  const stateByWorkspace = new Map<string, IdeWindowState>();
   let preferences: GlobalPreferences = { themeMode: "auto", completionSnippets: [] };
 
   const interpreter: PythonInterpreter = {
@@ -129,10 +147,41 @@ export function createMockInnerHost(): CodexInnerIdeHostV1 {
   return {
     apiVersion: "1",
     workspace: {
-      async current() {
-        return { id: "mock-workspace", name: "python-example", rootLabel: "demo/python-example" };
+      async current() { return structuredClone(currentWorkspace); },
+      async choose() {
+        currentWorkspace = secondaryWorkspace;
+        recentWorkspaces = [
+          { ...secondaryWorkspace, available: true },
+          ...recentWorkspaces.filter((workspace) => workspace.id !== secondaryWorkspace.id)
+        ].slice(0, 10);
+        return structuredClone(currentWorkspace);
       },
-      async choose() { return this.current(); }
+      async recent() { return structuredClone(recentWorkspaces); },
+      async openRecent(id) {
+        const workspace = recentWorkspaces.find((value) => value.id === id);
+        if (!workspace) throw new Error("Unknown recent workspace");
+        if (!workspace.available) throw new Error("This recent workspace is no longer available");
+        currentWorkspace = workspace.id === primaryWorkspace.id ? primaryWorkspace : secondaryWorkspace;
+        return structuredClone(currentWorkspace);
+      },
+      async removeRecent(id) {
+        recentWorkspaces = recentWorkspaces.filter((workspace) => workspace.id !== id);
+      },
+      async relocateRecent(id) {
+        if (!recentWorkspaces.some((workspace) => workspace.id === id)) {
+          throw new Error("Unknown recent workspace");
+        }
+        currentWorkspace = {
+          id: "mock-relocated",
+          name: "relocated-example",
+          rootLabel: "demo/relocated-example"
+        };
+        recentWorkspaces = [
+          { ...currentWorkspace, available: true },
+          ...recentWorkspaces.filter((workspace) => workspace.id !== id)
+        ].slice(0, 10);
+        return structuredClone(currentWorkspace);
+      }
     },
     files: {
       async list(relativePath = "") { return directEntries(files, directories, relativePath); },
@@ -313,7 +362,7 @@ export function createMockInnerHost(): CodexInnerIdeHostV1 {
         queueMicrotask(() => editListeners.forEach((listener) => listener({
           proposal: {
             proposalId,
-            workspaceId: "mock-workspace",
+            workspaceId: currentWorkspace.id,
             relativePath: "main.py",
             scope: request.scope === "selection" ? "selection" : "file",
             baseBufferDigest,
@@ -328,7 +377,7 @@ export function createMockInnerHost(): CodexInnerIdeHostV1 {
         editListeners.forEach((listener) => listener({
           proposal: {
             proposalId,
-            workspaceId: "mock-workspace",
+            workspaceId: currentWorkspace.id,
             relativePath: "main.py",
             scope: "file",
             baseBufferDigest: "",
@@ -348,8 +397,8 @@ export function createMockInnerHost(): CodexInnerIdeHostV1 {
     window: {
       setDirty() {},
       setPinned() {},
-      async loadState() { return state; },
-      async saveState(nextState) { state = structuredClone(nextState); },
+      async loadState() { return structuredClone(stateByWorkspace.get(currentWorkspace.id) ?? null); },
+      async saveState(nextState) { stateByWorkspace.set(currentWorkspace.id, structuredClone(nextState)); },
       async closeIde() {}
     }
   };

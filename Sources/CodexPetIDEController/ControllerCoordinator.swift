@@ -6,6 +6,7 @@ import Foundation
 final class ControllerCoordinator: IDEWindowControllerDelegate {
     private let launcher = CodexLauncher()
     private let workspaceStateStore = WorkspaceStateStore()
+    private let recentWorkspaceStore = RecentWorkspaceStore()
     private let globalPreferencesStore = GlobalPreferencesStore()
     private let sessionToken = UUID().uuidString.lowercased()
     private lazy var quickChatHandoffController = QuickChatHandoffController(launcher: launcher)
@@ -76,13 +77,7 @@ final class ControllerCoordinator: IDEWindowControllerDelegate {
     }
 
     func chooseWorkspace() async {
-        let panel = NSOpenPanel()
-        panel.title = "Choose the Codex Inner IDE workspace"
-        panel.prompt = "Use Workspace"
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
-        panel.allowsMultipleSelection = false
-        guard panel.runModal() == .OK, let url = panel.url else { return }
+        guard let url = selectWorkspaceDirectory() else { return }
 
         do {
             if ideWindowController != nil {
@@ -448,9 +443,39 @@ final class ControllerCoordinator: IDEWindowControllerDelegate {
         case "workspace.current":
             return try .fromEncodable(workspace.binding)
         case "workspace.choose":
-            await chooseWorkspace()
-            guard let current = self.workspace else { throw InnerIDEError.workspaceUnavailable }
-            return try .fromEncodable(current.binding)
+            guard let url = selectWorkspaceDirectory() else {
+                return try .fromEncodable(workspace.binding)
+            }
+            return try .fromEncodable(try await switchActiveWorkspace(to: url))
+        case "workspace.recent":
+            return try .fromEncodable(recentWorkspaceStore.list())
+        case "workspace.openRecent":
+            guard let id = request.params["id"]?.stringValue,
+                  let url = recentWorkspaceStore.authorizedURL(for: id)
+            else { throw InnerIDEError.bridgeRejected("unknown recent workspace") }
+            guard workspaceStateStore.isDirectory(url) else {
+                throw InnerIDEError.commandFailed("This recent workspace is no longer available")
+            }
+            return try .fromEncodable(try await switchActiveWorkspace(to: url))
+        case "workspace.removeRecent":
+            guard let id = request.params["id"]?.stringValue else {
+                throw InnerIDEError.bridgeRejected("recent workspace id is missing")
+            }
+            recentWorkspaceStore.remove(id: id)
+            return .object([:])
+        case "workspace.relocateRecent":
+            guard let id = request.params["id"]?.stringValue,
+                  recentWorkspaceStore.authorizedURL(for: id) != nil
+            else { throw InnerIDEError.bridgeRejected("unknown recent workspace") }
+            guard let url = selectWorkspaceDirectory(title: "Locate the Workspace") else {
+                return try .fromEncodable(workspace.binding)
+            }
+            let selectedBinding = try WorkspaceService(rootURL: url).binding
+            let binding = try await switchActiveWorkspace(to: url)
+            if binding.id == selectedBinding.id {
+                _ = try recentWorkspaceStore.replace(id: id, with: url)
+            }
+            return try .fromEncodable(binding)
         case "preferences.load":
             return try .fromEncodable(globalPreferencesStore.load())
         case "preferences.save":
@@ -789,6 +814,53 @@ final class ControllerCoordinator: IDEWindowControllerDelegate {
     private func bindWorkspace(_ url: URL, taskKey: String) throws {
         workspace = try WorkspaceService(rootURL: url)
         workspaceStateStore.recordWorkspace(url, taskKey: taskKey)
+        _ = try recentWorkspaceStore.record(url)
+    }
+
+    private func selectWorkspaceDirectory(
+        title: String = "Choose the Codex Inner IDE workspace"
+    ) -> URL? {
+        let panel = NSOpenPanel()
+        panel.title = title
+        panel.prompt = "Use Workspace"
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        return panel.runModal() == .OK ? panel.url : nil
+    }
+
+    private func switchActiveWorkspace(to url: URL) async throws -> WorkspaceBinding {
+        let next = try WorkspaceService(rootURL: url)
+        if next.binding.id == workspace?.binding.id {
+            workspaceStateStore.recordWorkspace(next.rootURL, taskKey: activeTaskKey)
+            _ = try recentWorkspaceStore.record(next.rootURL)
+            return next.binding
+        }
+        if let controller = ideWindowController,
+           !(await confirmIDEClosure(controller)) {
+            guard let current = workspace else { throw InnerIDEError.workspaceUnavailable }
+            return current.binding
+        }
+
+        let previous = workspace
+        await stopIDERuntime()
+        workspace = next
+        do {
+            await startPythonRuntime(next)
+            try startWatcher(next)
+            workspaceStateStore.recordWorkspace(next.rootURL, taskKey: activeTaskKey)
+            _ = try recentWorkspaceStore.record(next.rootURL)
+            dirty = false
+            return next.binding
+        } catch {
+            await stopIDERuntime()
+            workspace = previous
+            if let previous {
+                await startPythonRuntime(previous)
+                try? startWatcher(previous)
+            }
+            throw error
+        }
     }
 
     private func waitForMainRendererShell(

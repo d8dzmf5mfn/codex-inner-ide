@@ -21,8 +21,13 @@ import {
   type LanguageId
 } from "../core/languages";
 import type { FileEntry, FileKind } from "../types/inner-host";
+import type { RecentWorkspace, WorkspaceBinding } from "../types/inner-host";
+import { WorkspaceSwitcher } from "./WorkspaceSwitcher";
 
 type FileTreeProps = {
+  workspace: WorkspaceBinding;
+  recentWorkspaces: RecentWorkspace[];
+  workspaceSwitching: boolean;
   rootEntries: FileEntry[];
   activePath: string | null;
   initialExpanded: string[];
@@ -34,9 +39,16 @@ type FileTreeProps = {
   onRename: (from: string, to: string) => Promise<void>;
   onTrash: (relativePath: string) => Promise<void>;
   onError: (reason: unknown) => void;
+  onChooseWorkspace: () => Promise<void>;
+  onOpenRecentWorkspace: (id: string) => Promise<void>;
+  onRemoveRecentWorkspace: (id: string) => Promise<void>;
+  onRelocateRecentWorkspace: (id: string) => Promise<void>;
 };
 
 export function FileTree({
+  workspace,
+  recentWorkspaces,
+  workspaceSwitching,
   rootEntries,
   activePath,
   initialExpanded,
@@ -47,7 +59,11 @@ export function FileTree({
   onCreate,
   onRename,
   onTrash,
-  onError
+  onError,
+  onChooseWorkspace,
+  onOpenRecentWorkspace,
+  onRemoveRecentWorkspace,
+  onRelocateRecentWorkspace
 }: FileTreeProps) {
   const [children, setChildren] = useState<Record<string, FileEntry[]>>({ "": rootEntries });
   const [expanded, setExpanded] = useState(() => new Set(initialExpanded));
@@ -140,6 +156,15 @@ export function FileTree({
           </button>
         </span>
       </div>
+      <WorkspaceSwitcher
+        workspace={workspace}
+        recent={recentWorkspaces}
+        busy={workspaceSwitching}
+        onChoose={onChooseWorkspace}
+        onOpenRecent={onOpenRecentWorkspace}
+        onRemoveRecent={onRemoveRecentWorkspace}
+        onRelocateRecent={onRelocateRecentWorkspace}
+      />
       {createKind && (
         <form className="tree-create-form" aria-label={createKind === "file" ? "Create file" : "Create folder"} onSubmit={(event) => void create(event)}>
           <label htmlFor="tree-create-name">{createKind === "file" ? "File name" : "Folder name"}</label>

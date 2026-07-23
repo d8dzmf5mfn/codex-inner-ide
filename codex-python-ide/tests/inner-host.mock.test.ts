@@ -83,6 +83,40 @@ describe("development Inner IDE host", () => {
     await expect(host.window.loadState()).resolves.toMatchObject({ pinned: true });
   });
 
+  it("switches only through authorized recent workspace ids", async () => {
+    const host = createMockInnerHost();
+    await expect(host.workspace.recent()).resolves.toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "mock-workspace", available: true }),
+      expect.objectContaining({ id: "mock-missing", available: false })
+    ]));
+    await expect(host.workspace.openRecent("untrusted-id")).rejects.toThrow("Unknown recent workspace");
+    await expect(host.workspace.openRecent("mock-missing")).rejects.toThrow("no longer available");
+    await expect(host.workspace.openRecent("mock-secondary")).resolves.toMatchObject({ id: "mock-secondary" });
+  });
+
+  it("restores window state independently for each workspace", async () => {
+    const host = createMockInnerHost();
+    await host.window.saveState({
+      openPaths: ["main.py"],
+      activePath: "main.py",
+      bottomPanelOpen: true,
+      expandedDirectories: ["tests"]
+    });
+    await host.workspace.openRecent("mock-secondary");
+    await expect(host.window.loadState()).resolves.toBeNull();
+    await host.window.saveState({
+      openPaths: ["index.html"],
+      activePath: "index.html",
+      bottomPanelOpen: false,
+      expandedDirectories: []
+    });
+    await host.workspace.openRecent("mock-workspace");
+    await expect(host.window.loadState()).resolves.toMatchObject({
+      activePath: "main.py",
+      expandedDirectories: ["tests"]
+    });
+  });
+
   it("persists global completion snippets through the preferences contract", async () => {
     const host = createMockInnerHost();
     await host.preferences.save({

@@ -43,6 +43,7 @@ import type {
   PythonEditProposal,
   PythonEditScope,
   PreviewDescriptor,
+  RecentWorkspace,
   RuntimeDescriptor,
   SelectionRange,
   WorkspaceBinding
@@ -56,6 +57,15 @@ type LoadedIde = {
   rootEntries: FileEntry[];
   savedExpanded: string[];
   savedViews: Record<string, DocumentViewState>;
+};
+type WorkspaceSession = {
+  loaded: LoadedIde;
+  documents: OpenDocument[];
+  activePath: string | null;
+  bottomPanelOpen: boolean;
+  expandedDirectories: string[];
+  documentViews: Record<string, DocumentViewState>;
+  pinned: boolean;
 };
 
 export function App() {
@@ -75,6 +85,8 @@ function MissingHost() {
 
 function InnerIde({ host }: { host: CodexInnerIdeHostV1 }) {
   const [loaded, setLoaded] = useState<LoadedIde | null>(null);
+  const [recentWorkspaces, setRecentWorkspaces] = useState<RecentWorkspace[]>([]);
+  const [workspaceSwitching, setWorkspaceSwitching] = useState(false);
   const [documents, setDocuments] = useState<OpenDocument[]>([]);
   const [activePath, setActivePath] = useState<string | null>(null);
   const [runtimes, setRuntimes] = useState<Record<string, RuntimeDescriptor[]>>({});
@@ -108,8 +120,38 @@ function InnerIde({ host }: { host: CodexInnerIdeHostV1 }) {
     diagnostics,
     execute,
     stop,
-    check
+    check,
+    reset: resetRuntime
   } = useRuntimeExecution(host);
+
+  const applyWorkspaceSession = useCallback((session: WorkspaceSession) => {
+    setLoaded(session.loaded);
+    setDocuments(session.documents);
+    setActivePath(session.activePath);
+    setBottomPanelOpen(session.bottomPanelOpen);
+    setExpandedDirectories(session.expandedDirectories);
+    setDocumentViews(session.documentViews);
+    setPinned(session.pinned);
+    setRuntimes({});
+    setSelectedRuntimeIds({});
+    setPreview(null);
+    setRevealDiagnostic(null);
+    setConflict(null);
+    setActiveSelection(null);
+    setEditComposer(null);
+    setProposal(null);
+    setProposalMessage(null);
+    resetRuntime();
+    host.window.setPinned(session.pinned);
+  }, [host, resetRuntime]);
+
+  const refreshRecentWorkspaces = useCallback(async () => {
+    try {
+      setRecentWorkspaces(await host.workspace.recent());
+    } catch (reason) {
+      setNotice(message(reason, "Unable to load recent workspaces"));
+    }
+  }, [host]);
 
   useEffect(() => {
     documentsRef.current = documents;
@@ -118,42 +160,15 @@ function InnerIde({ host }: { host: CodexInnerIdeHostV1 }) {
 
   useEffect(() => {
     let cancelled = false;
-    void Promise.all([
-      host.workspace.current(),
-      host.files.list(""),
-      host.window.loadState()
-    ]).then(async ([workspace, rootEntries, savedState]) => {
-      const preferred = savedState?.openPaths ?? [];
-      const fallback = preferredInitialFilePath(rootEntries);
-      const paths = preferred.length > 0 ? preferred : fallback ? [fallback] : [];
-      const results = await Promise.allSettled(paths.map((path) => host.files.read(path)));
-      const initialDocuments = results
-        .filter((result): result is PromiseFulfilledResult<FileSnapshot> => result.status === "fulfilled")
-        .map((result) => openDocument(result.value));
-      const openPaths = initialDocuments.map((document) => document.relativePath);
-      const initialActive = savedState?.activePath && openPaths.includes(savedState.activePath)
-        ? savedState.activePath
-        : openPaths[0] ?? null;
+    void loadWorkspaceSession(host).then((session) => {
       if (cancelled) return;
-      setLoaded({
-        workspace,
-        rootEntries,
-        savedExpanded: savedState?.expandedDirectories ?? [],
-        savedViews: savedState?.documentViews ?? {}
-      });
-      setDocuments(initialDocuments);
-      setActivePath(initialActive);
-      setBottomPanelOpen(savedState?.bottomPanelOpen ?? true);
-      setExpandedDirectories(savedState?.expandedDirectories ?? []);
-      setDocumentViews(savedState?.documentViews ?? {});
-      const restoredPinned = savedState?.pinned ?? false;
-      setPinned(restoredPinned);
-      host.window.setPinned(restoredPinned);
+      applyWorkspaceSession(session);
     }).catch((reason: unknown) => {
       if (!cancelled) setError(message(reason, "Unable to initialize the IDE"));
     });
+    void refreshRecentWorkspaces();
     return () => { cancelled = true; };
-  }, [host]);
+  }, [applyWorkspaceSession, host, refreshRecentWorkspaces]);
 
   useEffect(() => {
     let cancelled = false;
@@ -174,20 +189,53 @@ function InnerIde({ host }: { host: CodexInnerIdeHostV1 }) {
     });
   }, [host, loaded?.workspace.id]);
 
+  const persistCurrentWorkspaceState = useCallback(async () => {
+    if (!loaded) return;
+    await host.window.saveState({
+      openPaths: documents.map((document) => document.relativePath),
+      activePath,
+      bottomPanelOpen,
+      expandedDirectories,
+      documentViews,
+      pinned
+    });
+  }, [activePath, bottomPanelOpen, documentViews, documents, expandedDirectories, host, loaded, pinned]);
+
   useEffect(() => {
     if (!loaded) return;
     const timer = window.setTimeout(() => {
-      void host.window.saveState({
-        openPaths: documents.map((document) => document.relativePath),
-        activePath,
-        bottomPanelOpen,
-        expandedDirectories,
-        documentViews,
-        pinned
-      });
+      void persistCurrentWorkspaceState();
     }, 180);
     return () => window.clearTimeout(timer);
-  }, [activePath, bottomPanelOpen, documentViews, documents, expandedDirectories, host, loaded, pinned]);
+  }, [loaded, persistCurrentWorkspaceState]);
+
+  const switchWorkspace = useCallback(async (operation: () => Promise<WorkspaceBinding>) => {
+    if (!loaded || workspaceSwitching) return;
+    setWorkspaceSwitching(true);
+    setError(null);
+    try {
+      await persistCurrentWorkspaceState();
+      const next = await operation();
+      if (next.id !== loaded.workspace.id) {
+        applyWorkspaceSession(await loadWorkspaceSession(host, next));
+        setNotice(`Opened workspace ${next.name}`);
+      }
+      await refreshRecentWorkspaces();
+    } catch (reason) {
+      setError(message(reason, "Unable to switch workspace"));
+    } finally {
+      setWorkspaceSwitching(false);
+    }
+  }, [applyWorkspaceSession, host, loaded, persistCurrentWorkspaceState, refreshRecentWorkspaces, workspaceSwitching]);
+
+  const removeRecentWorkspace = useCallback(async (id: string) => {
+    try {
+      await host.workspace.removeRecent(id);
+      await refreshRecentWorkspaces();
+    } catch (reason) {
+      setError(message(reason, "Unable to remove recent workspace"));
+    }
+  }, [host, refreshRecentWorkspaces]);
 
   useEffect(() => host.files.watch((change) => {
     void updateCompletionIndexFromChange(host, change);
@@ -254,7 +302,7 @@ function InnerIde({ host }: { host: CodexInnerIdeHostV1 }) {
       if (!cancelled) setNotice(message(reason, `${activeLanguage.label} runtime discovery is unavailable`));
     });
     return () => { cancelled = true; };
-  }, [activeDocument?.relativePath, activeLanguage.id, activeLanguage.label, host]);
+  }, [activeDocument?.relativePath, activeLanguage.id, activeLanguage.label, host, loaded?.workspace.id]);
 
   useEffect(() => {
     setActiveSelection((current) => current?.relativePath === activePath ? current : null);
@@ -591,6 +639,10 @@ function InnerIde({ host }: { host: CodexInnerIdeHostV1 }) {
 
       <div className="workspace-grid">
         <FileTree
+          key={loaded.workspace.id}
+          workspace={loaded.workspace}
+          recentWorkspaces={recentWorkspaces}
+          workspaceSwitching={workspaceSwitching}
           rootEntries={loaded.rootEntries}
           activePath={activePath}
           initialExpanded={loaded.savedExpanded}
@@ -617,6 +669,10 @@ function InnerIde({ host }: { host: CodexInnerIdeHostV1 }) {
             setDocuments((items) => items.filter((document) => document.relativePath !== path && !document.relativePath.startsWith(`${path}/`)));
             refreshTree();
           }}
+          onChooseWorkspace={() => switchWorkspace(() => host.workspace.choose())}
+          onOpenRecentWorkspace={(id) => switchWorkspace(() => host.workspace.openRecent(id))}
+          onRemoveRecentWorkspace={removeRecentWorkspace}
+          onRelocateRecentWorkspace={(id) => switchWorkspace(() => host.workspace.relocateRecent(id))}
           onError={(reason) => setError(message(reason, "File operation failed"))}
         />
         <div className="editor-stack">
@@ -695,4 +751,40 @@ function InnerIde({ host }: { host: CodexInnerIdeHostV1 }) {
 
 function message(reason: unknown, fallback: string) {
   return reason instanceof Error ? reason.message : fallback;
+}
+
+async function loadWorkspaceSession(
+  host: CodexInnerIdeHostV1,
+  workspaceOverride?: WorkspaceBinding
+): Promise<WorkspaceSession> {
+  const workspace = workspaceOverride ?? await host.workspace.current();
+  const [rootEntries, savedState] = await Promise.all([
+    host.files.list(""),
+    host.window.loadState()
+  ]);
+  const preferred = savedState?.openPaths ?? [];
+  const fallback = preferredInitialFilePath(rootEntries);
+  const paths = preferred.length > 0 ? preferred : fallback ? [fallback] : [];
+  const results = await Promise.allSettled(paths.map((path) => host.files.read(path)));
+  const documents = results
+    .filter((result): result is PromiseFulfilledResult<FileSnapshot> => result.status === "fulfilled")
+    .map((result) => openDocument(result.value));
+  const openPaths = documents.map((document) => document.relativePath);
+  const activePath = savedState?.activePath && openPaths.includes(savedState.activePath)
+    ? savedState.activePath
+    : openPaths[0] ?? null;
+  return {
+    loaded: {
+      workspace,
+      rootEntries,
+      savedExpanded: savedState?.expandedDirectories ?? [],
+      savedViews: savedState?.documentViews ?? {}
+    },
+    documents,
+    activePath,
+    bottomPanelOpen: savedState?.bottomPanelOpen ?? true,
+    expandedDirectories: savedState?.expandedDirectories ?? [],
+    documentViews: savedState?.documentViews ?? {},
+    pinned: savedState?.pinned ?? false
+  };
 }

@@ -190,6 +190,13 @@ export type IdeWindowState = {
   pinned?: boolean;
 };
 
+export type RecentWorkspace = {
+  id: string;
+  name: string;
+  rootLabel: string;
+  available: boolean;
+};
+
 export type Unsubscribe = () => void;
 
 export interface CodexInnerIdeHostV1 {
@@ -197,6 +204,10 @@ export interface CodexInnerIdeHostV1 {
   workspace: {
     current(): Promise<WorkspaceBinding>;
     choose(): Promise<WorkspaceBinding>;
+    recent(): Promise<RecentWorkspace[]>;
+    openRecent(id: string): Promise<WorkspaceBinding>;
+    removeRecent(id: string): Promise<void>;
+    relocateRecent(id: string): Promise<WorkspaceBinding>;
   };
   files: {
     list(relativePath?: string): Promise<FileEntry[]>;

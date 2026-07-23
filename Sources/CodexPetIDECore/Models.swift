@@ -243,6 +243,20 @@ public struct WorkspaceBinding: Codable, Equatable, Sendable {
     }
 }
 
+public struct RecentWorkspace: Codable, Equatable, Sendable {
+    public let id: String
+    public let name: String
+    public let rootLabel: String
+    public let available: Bool
+
+    public init(id: String, name: String, rootLabel: String, available: Bool) {
+        self.id = id
+        self.name = name
+        self.rootLabel = rootLabel
+        self.available = available
+    }
+}
+
 public enum FileKind: String, Codable, Sendable {
     case file
     case directory

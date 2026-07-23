@@ -298,6 +298,8 @@ final class ProtocolSafetyTests: XCTestCase {
         XCTAssertTrue(script.contains("edits.event"))
         XCTAssertTrue(script.contains("preferences.load"))
         XCTAssertTrue(script.contains("preferences.save"))
+        XCTAssertTrue(script.contains("workspace.recent"))
+        XCTAssertTrue(script.contains("workspace.openRecent"))
         XCTAssertTrue(script.contains("__codexInnerIdeGetActiveEditContext"))
     }
 
