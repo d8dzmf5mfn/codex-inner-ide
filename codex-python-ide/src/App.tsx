@@ -13,6 +13,12 @@ import { FileTree } from "./components/FileTree";
 import { EditRequestBar, IdeTitleBar, StatusNotice } from "./components/IdeChrome";
 import { OutputPanel } from "./components/OutputPanel";
 import { digestText } from "./core/edits";
+import {
+  preferredInitialFilePath,
+  selectionLanguageForPath,
+  supportsCodexEdit,
+  supportsPythonExecution
+} from "./core/languages";
 import { usePythonExecution } from "./hooks/usePythonExecution";
 import { useTimeTheme } from "./hooks/useTimeTheme";
 import type {
@@ -44,7 +50,7 @@ type LoadedIde = {
 
 export function App() {
   const host = useMemo(resolveInnerHost, []);
-  return host ? <PythonIde host={host} /> : <MissingHost />;
+  return host ? <InnerIde host={host} /> : <MissingHost />;
 }
 
 function MissingHost() {
@@ -57,7 +63,7 @@ function MissingHost() {
   );
 }
 
-function PythonIde({ host }: { host: CodexInnerIdeHostV1 }) {
+function InnerIde({ host }: { host: CodexInnerIdeHostV1 }) {
   const [loaded, setLoaded] = useState<LoadedIde | null>(null);
   const [documents, setDocuments] = useState<OpenDocument[]>([]);
   const [activePath, setActivePath] = useState<string | null>(null);
@@ -101,7 +107,7 @@ function PythonIde({ host }: { host: CodexInnerIdeHostV1 }) {
       host.window.loadState()
     ]).then(async ([workspace, rootEntries, savedState]) => {
       const preferred = savedState?.openPaths ?? [];
-      const fallback = rootEntries.find((entry) => entry.kind === "file" && entry.name.endsWith(".py"))?.relativePath;
+      const fallback = preferredInitialFilePath(rootEntries);
       const paths = preferred.length > 0 ? preferred : fallback ? [fallback] : [];
       const results = await Promise.allSettled(paths.map((path) => host.files.read(path)));
       const initialDocuments = results
@@ -206,7 +212,7 @@ function PythonIde({ host }: { host: CodexInnerIdeHostV1 }) {
     window.__codexInnerIdeGetActiveEditContext = async (instruction, requestedScope) => {
       if (!loaded || !activePath) return null;
       const document = documentsRef.current.find((item) => item.relativePath === activePath);
-      if (!document || document.readonly || !document.relativePath.endsWith(".py")) return null;
+      if (!document || document.readonly || !supportsCodexEdit(document.relativePath)) return null;
       const selection = activeSelection?.relativePath === activePath ? activeSelection : null;
       const scope: PythonEditScope = requestedScope === "auto"
         ? selection ? "selection" : "file"
@@ -278,7 +284,7 @@ function PythonIde({ host }: { host: CodexInnerIdeHostV1 }) {
       ));
       setConflict(null);
       setNotice(`Saved ${relativePath}`);
-      if (relativePath.endsWith(".py") && selectedInterpreterId) {
+      if (supportsPythonExecution(relativePath) && selectedInterpreterId) {
         await checkSyntax(relativePath, selectedInterpreterId);
       }
       return true;
@@ -317,7 +323,7 @@ function PythonIde({ host }: { host: CodexInnerIdeHostV1 }) {
   }, [activePath, saveAll, savePath]);
 
   const runActiveFile = async () => {
-    if (!activeDocument?.relativePath.endsWith(".py") || !selectedInterpreterId) return;
+    if (!activeDocument || !supportsPythonExecution(activeDocument.relativePath) || !selectedInterpreterId) return;
     if (!await savePath(activeDocument.relativePath)) return;
     setBottomPanelOpen(true);
     setError(null);
@@ -338,7 +344,7 @@ function PythonIde({ host }: { host: CodexInnerIdeHostV1 }) {
       const context: IdeSelectionContext = {
         workspaceId: loaded.workspace.id,
         relativePath: latest.relativePath,
-        language: latest.relativePath.endsWith(".py") ? "python" : "text",
+        language: selectionLanguageForPath(latest.relativePath),
         range,
         selectedText,
         surroundingText: lines.slice(start, end).join("\n"),
@@ -359,7 +365,7 @@ function PythonIde({ host }: { host: CodexInnerIdeHostV1 }) {
     scope: "selection" | "file",
     selection?: { range: SelectionRange; selectedText: string }
   ) => {
-    if (!activeDocument?.relativePath.endsWith(".py") || activeDocument.readonly) {
+    if (!activeDocument || !supportsCodexEdit(activeDocument.relativePath) || activeDocument.readonly) {
       setError("Open an editable Python file before requesting a Codex proposal.");
       return;
     }

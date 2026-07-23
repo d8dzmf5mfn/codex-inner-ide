@@ -1,3 +1,5 @@
+import type { SelectionLanguageId } from "../core/languages";
+
 export type FileKind = "file" | "directory";
 
 export type FileEntry = {
@@ -103,7 +105,7 @@ export type PythonEditProposalEvent = {
 export type IdeSelectionContext = {
   workspaceId: string;
   relativePath: string;
-  language: "python" | "text";
+  language: SelectionLanguageId;
   range: SelectionRange;
   selectedText: string;
   surroundingText: string;

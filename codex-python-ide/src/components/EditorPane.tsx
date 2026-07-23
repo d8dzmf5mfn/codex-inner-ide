@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import Editor, { type OnMount } from "@monaco-editor/react";
 import { Check, LoaderCircle, RotateCcw, Sparkles, X } from "lucide-react";
 import { digestText, previewLines } from "../core/edits";
+import { languageForPath, supportsCodexEdit } from "../core/languages";
 import type {
   Diagnostic,
   DocumentViewState,
@@ -74,6 +75,10 @@ export function EditorPane({
   const applyingRef = useRef(false);
 
   useEffect(() => { proposalRef.current = activeProposal; }, [activeProposal]);
+
+  useEffect(() => {
+    setSelectionMenu(null);
+  }, [activePath]);
 
   useEffect(() => {
     if (!revealDiagnostic || revealDiagnostic.relativePath !== activePath) return;
@@ -318,7 +323,7 @@ export function EditorPane({
           <Editor
             key={activeDocument.relativePath}
             path={activeDocument.relativePath}
-            language={activeDocument.relativePath.endsWith(".py") ? "python" : "plaintext"}
+            language={languageForPath(activeDocument.relativePath).monacoId}
             value={activeDocument.content}
             onChange={(value) => {
               if (!applyingRef.current) onChange(value ?? "");
@@ -344,15 +349,17 @@ export function EditorPane({
           <div className="empty-editor">Open a file to start coding.</div>
         )}
 
-        {selectionMenu && activeDocument?.relativePath.endsWith(".py") && !activeDocument.readonly && (
+        {selectionMenu && activeDocument && !activeDocument.readonly && (
           <div className="selection-actions" style={{ left: selectionMenu.left, top: selectionMenu.top }}>
-            <button
-              className="selection-trigger selection-edit-trigger"
-              type="button"
-              onClick={() => onEditSelection(selectionMenu.range, selectionMenu.selectedText)}
-            >
-              Edit with Codex
-            </button>
+            {supportsCodexEdit(activeDocument.relativePath) && (
+              <button
+                className="selection-trigger selection-edit-trigger"
+                type="button"
+                onClick={() => onEditSelection(selectionMenu.range, selectionMenu.selectedText)}
+              >
+                Edit with Codex
+              </button>
+            )}
             <button
               className="selection-trigger"
               type="button"

@@ -1,5 +1,6 @@
 import { type FormEvent, useEffect, useMemo, useState } from "react";
 import {
+  Braces,
   ChevronDown,
   ChevronRight,
   FileCode2,
@@ -11,6 +12,7 @@ import {
   Pencil,
   Trash2
 } from "lucide-react";
+import { languageForPath } from "../core/languages";
 import type { FileEntry, FileKind } from "../types/inner-host";
 
 type FileTreeProps = {
@@ -152,7 +154,12 @@ export function FileTree({
           const isDirectory = entry.kind === "directory";
           const isExpanded = expanded.has(entry.relativePath);
           const isActive = !isDirectory && activePath === entry.relativePath;
-          const Icon = isDirectory ? (isExpanded ? FolderOpen : Folder) : entry.name.endsWith(".py") ? FileCode2 : FileText;
+          const iconKind = languageForPath(entry.relativePath).iconKind;
+          const Icon = isDirectory
+            ? (isExpanded ? FolderOpen : Folder)
+            : iconKind === "code" || iconKind === "markup"
+              ? FileCode2
+              : iconKind === "data" ? Braces : FileText;
           return (
             <div
               className={`tree-row-wrap${isActive ? " tree-row-active" : ""}`}

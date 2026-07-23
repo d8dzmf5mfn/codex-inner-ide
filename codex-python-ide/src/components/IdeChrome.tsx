@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import type { FileSnapshot, PythonEditScope, PythonInterpreter, WorkspaceBinding } from "../types/inner-host";
 import type { OpenDocument } from "../core/documents";
+import { supportsCodexEdit, supportsPythonExecution } from "../core/languages";
 
 type IdeTitleBarProps = {
   workspace: WorkspaceBinding;
@@ -48,7 +49,9 @@ export function IdeTitleBar({
   onTogglePin,
   onClose
 }: IdeTitleBarProps) {
-  const activePython = activeDocument?.relativePath.endsWith(".py") === true;
+  const activePath = activeDocument?.relativePath ?? "";
+  const activePython = supportsPythonExecution(activePath);
+  const activeCodexEdit = supportsCodexEdit(activePath);
   return (
     <header className="titlebar">
       <div className="titlebar-project">
@@ -73,7 +76,7 @@ export function IdeTitleBar({
         <button type="button" onClick={onSave} disabled={!activeDocument?.dirty}>
           <Save size={15} strokeWidth={1.7} aria-hidden="true" /> Save
         </button>
-        <button type="button" onClick={onEditCurrentFile} disabled={!activePython || activeDocument?.readonly}>
+        <button type="button" onClick={onEditCurrentFile} disabled={!activeCodexEdit || activeDocument?.readonly}>
           <Sparkles size={15} strokeWidth={1.7} aria-hidden="true" /> Edit current file
         </button>
         <button className="run-button" type="button" onClick={onRun} disabled={running || !activePython || !selectedInterpreterId}>
