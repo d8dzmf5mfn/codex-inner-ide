@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import Editor, { type OnMount } from "@monaco-editor/react";
 import { Check, LoaderCircle, RotateCcw, Sparkles, X } from "lucide-react";
 import { digestText, previewLines } from "../core/edits";
-import { COMPLETION_TAB_PRECONDITION } from "../core/completions";
+import { COMPLETION_TAB_PRECONDITION, completionPrefixAt } from "../core/completions";
 import { languageForPath, supportsCodexEdit } from "../core/languages";
 import type {
   Diagnostic,
@@ -208,7 +208,9 @@ export function EditorPane({
       completionTimer = window.setTimeout(() => {
         const model = editor.getModel();
         const position = editor.getPosition();
-        if (!model || !position || model.getWordUntilPosition(position).word.length < 2) return;
+        if (!model || !position) return;
+        const prefix = completionPrefixAt(model.getLineContent(position.lineNumber), position.column);
+        if (prefix.length < 2 && prefix !== "$" && prefix !== "@") return;
         editor.trigger("keyboard", "editor.action.triggerSuggest", {});
       }, 60);
     });
@@ -368,6 +370,7 @@ export function EditorPane({
               suggestFontSize: 12,
               suggestLineHeight: 22,
               tabCompletion: "on",
+              wordBasedSuggestions: "off",
               wordWrap: "off",
               readOnly: activeDocument.readonly
             }}

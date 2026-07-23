@@ -13,6 +13,10 @@ export const COMPLETION_TAB_PRECONDITION = "suggestWidgetVisible && editorTextFo
 export const MAX_INDEXED_FILES = 1_500;
 export const MAX_INDEXED_CHARACTERS = 500_000;
 
+export function completionPrefixAt(line: string, column: number): string {
+  return line.slice(0, Math.max(0, column - 1)).match(/[@$A-Za-z_][\w$@-]*$/)?.[0] ?? "";
+}
+
 const skippedDirectories = new Set([
   ".git", ".build", ".next", ".nuxt", ".output", ".turbo", ".venv", "build", "coverage",
   "deriveddata", "dist", "node_modules", "out", "pods", "target", "vendor", "venv"
@@ -233,7 +237,7 @@ export function collectCompletionCandidates(input: {
     .sort((left, right) => priorities[left.source] - priorities[right.source]
       || left.label.localeCompare(right.label))
     .filter((candidate) => {
-      const key = candidate.label.toLocaleLowerCase();
+      const key = candidate.label;
       if (seen.has(key)) return false;
       seen.add(key);
       return true;
@@ -244,16 +248,16 @@ export function registerCompletionProviders(api: typeof Monaco): Monaco.IDisposa
   return LANGUAGE_DEFINITIONS.map((language) => api.languages.registerCompletionItemProvider(
     language.monacoId,
     {
-      triggerCharacters: [".", "@", ":"],
+      triggerCharacters: [".", "@", ":", "$"],
       provideCompletionItems(model, position) {
-        const word = model.getWordUntilPosition(position);
-        if (!word.word) return { suggestions: [] };
+        const prefix = completionPrefixAt(model.getLineContent(position.lineNumber), position.column);
+        if (!prefix) return { incomplete: false, suggestions: [] };
         const relativePath = model.uri.path.replace(/^\/+/, "");
         const values = collectCompletionCandidates({
           languageId: language.id,
           relativePath,
           content: model.getValue(),
-          prefix: word.word
+          prefix
         });
         return {
           incomplete: false,
@@ -269,9 +273,9 @@ export function registerCompletionProviders(api: typeof Monaco): Monaco.IDisposa
             sortText: `${String(index).padStart(5, "0")}-${candidate.label}`,
             range: new api.Range(
               position.lineNumber,
-              word.startColumn,
+              position.column - prefix.length,
               position.lineNumber,
-              word.endColumn
+              position.column
             )
           }))
         };

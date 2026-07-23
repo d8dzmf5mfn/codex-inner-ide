@@ -2,8 +2,10 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
   COMPLETION_TAB_PRECONDITION,
   collectCompletionCandidates,
+  completionPrefixAt,
   completionIndex,
   extractSymbols,
+  registerCompletionProviders,
   setUserCompletionSnippets,
   shouldSkipIndexedDirectory
 } from "../src/core/completions";
@@ -121,6 +123,73 @@ describe("language-aware completions", () => {
       "ProcessPoolExecutor",
       "Protocol"
     ]));
+  });
+
+  it.each([
+    ["python", "dat", ["dataclass", "date", "datetime"]],
+    ["python", "path", ["Path"]],
+    ["java", "arr", ["ArrayList", "Arrays"]],
+    ["java", "compl", ["CompletableFuture", "CompletionStage"]],
+    ["javascript", "str", ["String", "structuredClone"]],
+    ["javascript", "doc", ["document"]],
+    ["typescript", "part", ["Partial"]],
+    ["typescript", "inter", ["interface", "IntersectionObserver"]],
+    ["html", "sec", ["section"]],
+    ["html", "aria", ["aria-label"]],
+    ["css", "grid-t", ["grid-template", "grid-template-columns", "grid-template-rows"]],
+    ["css", "prefers", ["prefers-color-scheme", "prefers-reduced-motion"]],
+    ["json", "$", ["$schema", "$ref", "$defs"]],
+    ["json", "prop", ["properties"]],
+    ["markdown", "str", ["strikethrough"]],
+    ["markdown", "tab", ["table"]]
+  ] as const)("matches %s catalog entries for the %s prefix", (languageId, prefix, expectedLabels) => {
+    const labels = collectCompletionCandidates({
+      languageId,
+      relativePath: `sample.${languageForId(languageId).defaultExtension.replace(/^\./, "")}`,
+      content: "",
+      prefix
+    }).map((value) => value.label);
+    expect(labels).toEqual(expect.arrayContaining([...expectedLabels]));
+  });
+
+  it("returns a complete empty result instead of leaving the widget loading", () => {
+    let pythonProvider: {
+      provideCompletionItems(model: unknown, position: unknown): { incomplete?: boolean; suggestions: unknown[] };
+    } | undefined;
+    const disposable = { dispose() {} };
+    const api = {
+      Range: class {},
+      languages: {
+        CompletionItemInsertTextRule: { InsertAsSnippet: 4 },
+        CompletionItemKind: {
+          Keyword: 17,
+          Function: 1,
+          Variable: 5,
+          Class: 7,
+          Property: 9,
+          Snippet: 27
+        },
+        registerCompletionItemProvider(language: string, provider: typeof pythonProvider) {
+          if (language === "python") pythonProvider = provider;
+          return disposable;
+        }
+      }
+    };
+    registerCompletionProviders(api as never);
+
+    const result = pythonProvider!.provideCompletionItems({
+      getLineContent: () => "zzzz-no-match",
+      uri: { path: "/main.py" },
+      getValue: () => ""
+    }, { lineNumber: 1, column: 14 });
+    expect(result).toEqual({ incomplete: false, suggestions: [] });
+  });
+
+  it("recognizes prefixes that Monaco does not treat as plain words", () => {
+    expect(completionPrefixAt("$", 2)).toBe("$");
+    expect(completionPrefixAt("  $sch", 7)).toBe("$sch");
+    expect(completionPrefixAt("grid-t", 7)).toBe("grid-t");
+    expect(completionPrefixAt("@med", 5)).toBe("@med");
   });
 
   it("accepts with Tab only while the suggestion widget has editor focus", () => {
