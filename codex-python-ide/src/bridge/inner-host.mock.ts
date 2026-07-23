@@ -141,7 +141,8 @@ export function createMockInnerHost(): CodexInnerIdeHostV1 {
       source: action === "preview" || action === "validate" ? "builtin" : "path",
       action,
       available: action !== "none",
-      unavailableReason: action === "none" ? "Plain text cannot run" : null
+      unavailableReason: action === "none" ? "Plain text cannot run" : null,
+      setupOptions: []
     };
   };
 
@@ -319,6 +320,10 @@ export function createMockInnerHost(): CodexInnerIdeHostV1 {
           exitCode: 143
         }));
       },
+      async copySetupCommand(command) {
+        await navigator.clipboard?.writeText(command);
+      },
+      async openSetupDownload() {},
       async check() { return []; },
       subscribe(listener) {
         runtimeListeners.add(listener);

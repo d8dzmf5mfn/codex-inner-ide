@@ -618,6 +618,29 @@ function InnerIde({ host }: { host: CodexInnerIdeHostV1 }) {
           ...current,
           [activeLanguage.id]: id
         }))}
+        onRecheckRuntime={() => {
+          void host.runtime.discover(activeLanguage.id).then((values) => {
+            setRuntimes((current) => ({ ...current, [activeLanguage.id]: values }));
+            setSelectedRuntimeIds((current) => ({
+              ...current,
+              [activeLanguage.id]: values.find((value) => value.available)?.id
+                ?? values[0]?.id
+                ?? ""
+            }));
+            if (values.some((value) => value.available)) {
+              setNotice(`${activeLanguage.label} runtime is ready.`);
+            }
+          }).catch((reason) => setError(message(reason, "Unable to recheck the runtime")));
+        }}
+        onCopySetupCommand={(command) => {
+          void host.runtime.copySetupCommand(command)
+            .then(() => setNotice("Setup command copied. It was not executed."))
+            .catch((reason) => setError(message(reason, "Unable to copy the setup command")));
+        }}
+        onOpenSetupDownload={(url) => {
+          void host.runtime.openSetupDownload(url)
+            .catch((reason) => setError(message(reason, "Unable to open the official download page")));
+        }}
         onCreateVenv={() => void host.python.createVenv().then((interpreter) => {
           const runtime: RuntimeDescriptor = {
             id: interpreter.id,
@@ -627,7 +650,8 @@ function InnerIde({ host }: { host: CodexInnerIdeHostV1 }) {
             executable: interpreter.executable,
             source: interpreter.source,
             action: "run",
-            available: true
+            available: true,
+            setupOptions: []
           };
           setRuntimes((current) => ({ ...current, python: [runtime] }));
           setSelectedRuntimeIds((current) => ({ ...current, python: runtime.id }));

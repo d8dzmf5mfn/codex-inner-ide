@@ -778,10 +778,30 @@ final class ControllerCoordinator: IDEWindowControllerDelegate {
                         source: "missing",
                         action: .run,
                         available: false,
-                        unavailableReason: pythonUnavailableReason ?? "Python service is not ready"
+                        unavailableReason: pythonUnavailableReason ?? "Python service is not ready",
+                        setupOptions: RuntimeSetupGuide.options(
+                            languageID: "python",
+                            homebrewAvailable: RuntimeSetupGuide.homebrewExecutable() != nil
+                        )
                     )])
                 }
                 let interpreters = await pythonService.discover()
+                if interpreters.isEmpty {
+                    return try .fromEncodable([RuntimeDescriptor(
+                        id: "python-unavailable",
+                        languageId: "python",
+                        label: "Python required",
+                        version: "python3 or python not found",
+                        source: "missing",
+                        action: .run,
+                        available: false,
+                        unavailableReason: "Install Python or add it to PATH",
+                        setupOptions: RuntimeSetupGuide.options(
+                            languageID: "python",
+                            homebrewAvailable: RuntimeSetupGuide.homebrewExecutable() != nil
+                        )
+                    )])
+                }
                 return try .fromEncodable(interpreters.map { interpreter in
                     RuntimeDescriptor(
                         id: interpreter.id,
@@ -798,6 +818,22 @@ final class ControllerCoordinator: IDEWindowControllerDelegate {
                 return try .fromEncodable(await runtimeService.discover(languageID: languageID))
             }
             return try .fromEncodable(Self.builtinRuntimeDescriptors(languageID: languageID))
+        case "runtime.copySetupCommand":
+            guard let command = request.params["command"]?.stringValue,
+                  Self.allowedSetupCommands.contains(command)
+            else { throw InnerIDEError.bridgeRejected("unsupported setup command") }
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(command, forType: .string)
+            return .object([:])
+        case "runtime.openSetupDownload":
+            guard let rawURL = request.params["url"]?.stringValue,
+                  Self.allowedSetupDownloadURLs.contains(rawURL),
+                  let url = URL(string: rawURL)
+            else { throw InnerIDEError.bridgeRejected("unsupported setup download URL") }
+            guard NSWorkspace.shared.open(url) else {
+                throw InnerIDEError.commandFailed("The official download page could not be opened")
+            }
+            return .object([:])
         case "runtime.execute":
             let value = try request.params.decode(RuntimeExecuteRequest.self)
             try reserveRuntimeTask()
@@ -1236,6 +1272,19 @@ final class ControllerCoordinator: IDEWindowControllerDelegate {
             )]
         }
     }
+
+    private static let allowedSetupCommands: Set<String> = [
+        "brew install python",
+        "brew install openjdk",
+        "brew install node",
+        "npm install --save-dev typescript tsx"
+    ]
+
+    private static let allowedSetupDownloadURLs: Set<String> = [
+        RuntimeSetupGuide.pythonDownloadURL,
+        RuntimeSetupGuide.nodeDownloadURL,
+        RuntimeSetupGuide.javaDownloadURL
+    ]
 
     private func present(_ error: Error) {
         presentMessage("Codex Inner IDE", detail: error.localizedDescription)

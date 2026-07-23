@@ -203,6 +203,99 @@ select:focus-visible {
   color: #ffffff;
 }
 
+.runtime-setup {
+  position: relative;
+  height: 30px;
+  -webkit-app-region: no-drag;
+}
+
+.runtime-setup > summary {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid #d28b3c;
+  border-radius: 6px;
+  background: #fff7e8;
+  color: #7c4b13;
+  font-size: 12px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.runtime-setup > summary::-webkit-details-marker {
+  display: none;
+}
+
+.runtime-setup-popover {
+  position: absolute;
+  z-index: 80;
+  top: 36px;
+  right: 0;
+  width: min(380px, calc(100vw - 24px));
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 14px 42px rgba(0, 0, 0, 0.18);
+}
+
+.runtime-setup-popover > strong {
+  display: block;
+  font-size: 13px;
+}
+
+.runtime-setup-popover p {
+  margin: 5px 0 10px;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.runtime-setup-option {
+  padding: 10px 0;
+  border-top: 1px solid var(--border);
+}
+
+.runtime-setup-option > div:first-child {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12px;
+}
+
+.runtime-setup-option > div:first-child span {
+  color: var(--text-muted);
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
+.runtime-setup-command {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.runtime-setup-command code {
+  flex: 1;
+  min-width: 0;
+  overflow: auto;
+  padding: 7px 8px;
+  border-radius: 5px;
+  background: var(--surface-muted);
+  font: 11px ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: nowrap;
+}
+
+.runtime-setup-popover .runtime-recheck {
+  width: 100%;
+  justify-content: center;
+  margin-top: 4px;
+}
+
 .notice-bar {
   display: flex;
   align-items: center;
@@ -1408,6 +1501,12 @@ select:focus-visible {
   color: #9cc8fa;
 }
 
+:root[data-theme="dark"] .runtime-setup > summary {
+  border-color: #9c6a2d;
+  background: #3e301e;
+  color: #f2c680;
+}
+
 :root[data-theme="dark"] .editor-tabs,
 :root[data-theme="dark"] .output-panel,
 :root[data-theme="dark"] .output-heading {
@@ -1487,7 +1586,7 @@ select:focus-visible {
     display: none;
   }
 
-  .titlebar-actions button:not(.run-button):not(.pin-button) {
+  .titlebar-actions > button:not(.run-button):not(.pin-button) {
     width: 32px;
     justify-content: center;
     padding: 0;

@@ -2,7 +2,9 @@ import { type FormEvent } from "react";
 import {
   Braces,
   CircleCheck,
+  Copy,
   Code2,
+  ExternalLink,
   Eye,
   PanelLeftClose,
   PanelLeftOpen,
@@ -31,6 +33,9 @@ type IdeTitleBarProps = {
   sidebarCollapsed: boolean;
   hostMode: "native" | "browser" | "mock";
   onSelectRuntime: (id: string) => void;
+  onRecheckRuntime: () => void;
+  onCopySetupCommand: (command: string) => void;
+  onOpenSetupDownload: (url: string) => void;
   onCreateVenv: () => void;
   onSave: () => void;
   onManageSnippets: () => void;
@@ -53,6 +58,9 @@ export function IdeTitleBar({
   sidebarCollapsed,
   hostMode,
   onSelectRuntime,
+  onRecheckRuntime,
+  onCopySetupCommand,
+  onOpenSetupDownload,
   onCreateVenv,
   onSave,
   onManageSnippets,
@@ -67,6 +75,7 @@ export function IdeTitleBar({
   const language = languageForPath(activePath);
   const runtimeAction = runtimeActionForPath(activePath);
   const selectedRuntime = runtimes.find((runtime) => runtime.id === selectedRuntimeId) ?? runtimes[0];
+  const setupOptions = selectedRuntime?.setupOptions ?? [];
   const activeCodexEdit = supportsCodexEdit(activePath);
   const actionLabel = runtimeAction === "preview"
     ? `Preview ${language.label}`
@@ -113,6 +122,40 @@ export function IdeTitleBar({
         ) : language.id === "python" ? (
           <button type="button" onClick={onCreateVenv}>Create .venv</button>
         ) : <span className="runtime-unavailable">No runtime</span>}
+        {selectedRuntime?.available === false && setupOptions.length > 0 && (
+          <details className="runtime-setup">
+            <summary>Setup</summary>
+            <div className="runtime-setup-popover">
+              <strong>{selectedRuntime.label}</strong>
+              <p>{selectedRuntime.unavailableReason}</p>
+              {setupOptions.map((option) => (
+                <section key={option.id} className="runtime-setup-option">
+                  <div>
+                    <b>{option.label}</b>
+                    <span>{option.scope === "workspace" ? "Workspace" : "System"}</span>
+                  </div>
+                  <p>{option.description}</p>
+                  {option.command && (
+                    <div className="runtime-setup-command">
+                      <code>{option.command}</code>
+                      <button type="button" onClick={() => onCopySetupCommand(option.command!)}>
+                        <Copy size={13} aria-hidden="true" /> Copy
+                      </button>
+                    </div>
+                  )}
+                  {option.downloadURL && (
+                    <button type="button" onClick={() => onOpenSetupDownload(option.downloadURL!)}>
+                      <ExternalLink size={13} aria-hidden="true" /> Official download
+                    </button>
+                  )}
+                </section>
+              ))}
+              <button type="button" className="runtime-recheck" onClick={onRecheckRuntime}>
+                <RotateCcw size={13} aria-hidden="true" /> Recheck
+              </button>
+            </div>
+          </details>
+        )}
         <button type="button" onClick={onManageSnippets} title="Manage completion snippets">
           <Braces size={15} strokeWidth={1.7} aria-hidden="true" /> <span className="button-label">Snippets</span>
         </button>

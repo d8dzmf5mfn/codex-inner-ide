@@ -328,6 +328,36 @@ public enum RuntimeAction: String, Codable, Equatable, Sendable {
     case none
 }
 
+public enum RuntimeSetupScope: String, Codable, Equatable, Sendable {
+    case system
+    case workspace
+}
+
+public struct RuntimeSetupOption: Codable, Equatable, Sendable {
+    public let id: String
+    public let label: String
+    public let command: String?
+    public let downloadURL: String?
+    public let scope: RuntimeSetupScope
+    public let description: String
+
+    public init(
+        id: String,
+        label: String,
+        command: String? = nil,
+        downloadURL: String? = nil,
+        scope: RuntimeSetupScope,
+        description: String
+    ) {
+        self.id = id
+        self.label = label
+        self.command = command
+        self.downloadURL = downloadURL
+        self.scope = scope
+        self.description = description
+    }
+}
+
 public struct RuntimeDescriptor: Codable, Equatable, Sendable {
     public let id: String
     public let languageId: String
@@ -338,6 +368,7 @@ public struct RuntimeDescriptor: Codable, Equatable, Sendable {
     public let action: RuntimeAction
     public let available: Bool
     public let unavailableReason: String?
+    public let setupOptions: [RuntimeSetupOption]
 
     public init(
         id: String,
@@ -348,7 +379,8 @@ public struct RuntimeDescriptor: Codable, Equatable, Sendable {
         source: String,
         action: RuntimeAction,
         available: Bool = true,
-        unavailableReason: String? = nil
+        unavailableReason: String? = nil,
+        setupOptions: [RuntimeSetupOption] = []
     ) {
         self.id = id
         self.languageId = languageId
@@ -359,6 +391,29 @@ public struct RuntimeDescriptor: Codable, Equatable, Sendable {
         self.action = action
         self.available = available
         self.unavailableReason = unavailableReason
+        self.setupOptions = setupOptions
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, languageId, label, version, executable, source, action, available
+        case unavailableReason, setupOptions
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decode(String.self, forKey: .id)
+        languageId = try values.decode(String.self, forKey: .languageId)
+        label = try values.decode(String.self, forKey: .label)
+        version = try values.decode(String.self, forKey: .version)
+        executable = try values.decodeIfPresent(String.self, forKey: .executable)
+        source = try values.decode(String.self, forKey: .source)
+        action = try values.decode(RuntimeAction.self, forKey: .action)
+        available = try values.decode(Bool.self, forKey: .available)
+        unavailableReason = try values.decodeIfPresent(String.self, forKey: .unavailableReason)
+        setupOptions = try values.decodeIfPresent(
+            [RuntimeSetupOption].self,
+            forKey: .setupOptions
+        ) ?? []
     }
 }
 

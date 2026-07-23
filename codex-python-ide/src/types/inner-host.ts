@@ -37,6 +37,15 @@ export type PythonInterpreter = {
 
 export type RuntimeAction = "run" | "preview" | "validate" | "none";
 
+export type RuntimeSetupOption = {
+  id: string;
+  label: string;
+  command?: string | null;
+  downloadURL?: string | null;
+  scope: "system" | "workspace";
+  description: string;
+};
+
 export type RuntimeDescriptor = {
   id: string;
   languageId: string;
@@ -47,6 +56,7 @@ export type RuntimeDescriptor = {
   action: RuntimeAction;
   available: boolean;
   unavailableReason?: string | null;
+  setupOptions: RuntimeSetupOption[];
 };
 
 export type RuntimeExecuteRequest = {
@@ -233,6 +243,8 @@ export interface CodexInnerIdeHostV1 {
     execute(request: RuntimeExecuteRequest): Promise<{ runId: string }>;
     check(request: RuntimeCheckRequest): Promise<Diagnostic[]>;
     terminate(runId: string): Promise<void>;
+    copySetupCommand(command: string): Promise<void>;
+    openSetupDownload(url: string): Promise<void>;
     subscribe(listener: (event: RuntimeExecutionEvent) => void): Unsubscribe;
   };
   preview: {

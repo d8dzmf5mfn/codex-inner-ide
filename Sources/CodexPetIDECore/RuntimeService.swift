@@ -334,11 +334,10 @@ public actor RuntimeService {
     }
 
     private func discoverJava() async -> [RuntimeDescriptor] {
-        var candidates: [URL] = []
-        if let javaHome = ProcessInfo.processInfo.environment["JAVA_HOME"] {
-            candidates.append(URL(fileURLWithPath: javaHome).appendingPathComponent("bin/javac"))
-        }
-        candidates.append(workspace.rootURL.appendingPathComponent(".jdk/bin/javac"))
+        var candidates = RuntimeSetupGuide.javaCompilerCandidates(
+            workspaceRoot: workspace.rootURL,
+            fileManager: fileManager
+        )
         candidates.append(contentsOf: executableCandidates(named: "javac"))
         for candidate in uniqueExecutableURLs(candidates) {
             guard let result = try? await bufferedCommand(
@@ -365,7 +364,11 @@ public actor RuntimeService {
             source: "missing",
             action: .run,
             available: false,
-            unavailableReason: "Install a JDK that includes javac"
+            unavailableReason: "Install a JDK that includes javac",
+            setupOptions: RuntimeSetupGuide.options(
+                languageID: "java",
+                homebrewAvailable: homebrewAvailable
+            )
         )]
     }
 
@@ -395,7 +398,11 @@ public actor RuntimeService {
             source: "missing",
             action: .run,
             available: false,
-            unavailableReason: "Install Node.js or add it to PATH"
+            unavailableReason: "Install Node.js or add it to PATH",
+            setupOptions: RuntimeSetupGuide.options(
+                languageID: languageID,
+                homebrewAvailable: homebrewAvailable
+            )
         )]
     }
 
@@ -420,6 +427,7 @@ public actor RuntimeService {
                 )]
             }
         }
+        let nodeAvailable = !uniqueExecutableURLs(executableCandidates(named: "node")).isEmpty
         return [RuntimeDescriptor(
             id: "typescript-unavailable",
             languageId: "typescript",
@@ -428,7 +436,14 @@ public actor RuntimeService {
             source: "missing",
             action: .run,
             available: false,
-            unavailableReason: "Install a project-local tsx, ts-node, or TypeScript compiler"
+            unavailableReason: nodeAvailable
+                ? "Install a project-local tsx, ts-node, or TypeScript compiler"
+                : "Install Node.js before adding the TypeScript toolchain",
+            setupOptions: RuntimeSetupGuide.options(
+                languageID: "typescript",
+                homebrewAvailable: homebrewAvailable,
+                nodeAvailable: nodeAvailable
+            )
         )]
     }
 
@@ -585,6 +600,10 @@ public actor RuntimeService {
 
     private func source(for executable: URL) -> String {
         executable.path.hasPrefix(workspace.rootURL.path + "/") ? "project" : "path"
+    }
+
+    private var homebrewAvailable: Bool {
+        RuntimeSetupGuide.homebrewExecutable(fileManager: fileManager) != nil
     }
 
     private var readOnlyPolicy: JSONValue {

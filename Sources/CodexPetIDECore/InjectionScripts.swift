@@ -259,6 +259,8 @@ public enum InjectionScripts {
               execute: (request) => call('runtime.execute', request),
               check: (request) => call('runtime.check', request),
               terminate: (runId) => call('runtime.terminate', { runId }),
+              copySetupCommand: (command) => call('runtime.copySetupCommand', { command }),
+              openSetupDownload: (url) => call('runtime.openSetupDownload', { url }),
               subscribe: (listener) => subscribe('runtime.event', listener)
             },
             preview: {
@@ -445,6 +447,8 @@ public enum InjectionScripts {
               execute: (request) => call('runtime.execute', request),
               check: (request) => call('runtime.check', request),
               terminate: (runId) => call('runtime.terminate', { runId }),
+              copySetupCommand: (command) => call('runtime.copySetupCommand', { command }),
+              openSetupDownload: (url) => call('runtime.openSetupDownload', { url }),
               subscribe: (listener) => subscribe('runtime.event', listener)
             },
             preview: {
