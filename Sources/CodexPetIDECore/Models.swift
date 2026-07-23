@@ -570,8 +570,25 @@ public struct BridgeRequest: Codable, Equatable, Sendable {
     public let version: Int
     public let requestId: String
     public let sessionToken: String
+    public let clientId: String?
     public let method: String
     public let params: JSONValue
+
+    public init(
+        version: Int,
+        requestId: String,
+        sessionToken: String,
+        clientId: String? = nil,
+        method: String,
+        params: JSONValue
+    ) {
+        self.version = version
+        self.requestId = requestId
+        self.sessionToken = sessionToken
+        self.clientId = clientId
+        self.method = method
+        self.params = params
+    }
 }
 
 public struct BridgeFailure: Codable, Equatable, Sendable {

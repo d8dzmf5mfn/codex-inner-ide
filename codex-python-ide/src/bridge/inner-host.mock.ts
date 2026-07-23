@@ -136,8 +136,8 @@ export function createMockInnerHost(): CodexInnerIdeHostV1 {
     return {
       id: `mock-${languageId}`,
       languageId,
-      label: action === "preview" ? `${languageId.toUpperCase()} Preview` : `Mock ${languageId}`,
-      version: "Development",
+      label: action === "preview" ? `${languageId.toUpperCase()} demo` : `${languageId} demo`,
+      version: "Demo host",
       source: action === "preview" || action === "validate" ? "builtin" : "path",
       action,
       available: action !== "none",
@@ -147,6 +147,7 @@ export function createMockInnerHost(): CodexInnerIdeHostV1 {
 
   return {
     apiVersion: "1",
+    hostMode: "mock",
     workspace: {
       async current() { return structuredClone(currentWorkspace); },
       async choose() {
@@ -398,6 +399,7 @@ export function createMockInnerHost(): CodexInnerIdeHostV1 {
     window: {
       setDirty() {},
       setPinned() {},
+      updateActiveContext() {},
       async loadState() { return structuredClone(stateByWorkspace.get(currentWorkspace.id) ?? null); },
       async saveState(nextState) { stateByWorkspace.set(currentWorkspace.id, structuredClone(nextState)); },
       async closeIde() {}

@@ -2,6 +2,14 @@ import { describe, expect, it } from "vitest";
 import { createMockInnerHost } from "../src/bridge/inner-host.mock";
 
 describe("development Inner IDE host", () => {
+  it("is explicitly labelled as a demo host", async () => {
+    const host = createMockInnerHost();
+    const [java] = await host.runtime.discover("java");
+    expect(host.hostMode).toBe("mock");
+    expect(java.label).toBe("java demo");
+    expect(java.version).toBe("Demo host");
+  });
+
   it("enforces expectedDigest writes", async () => {
     const host = createMockInnerHost();
     const before = await host.files.read("main.py");

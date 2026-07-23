@@ -3,14 +3,21 @@ import Foundation
 public enum InjectionScripts {
     public static let mainBindingName = "codexInnerIdeMainBridge"
 
-    public static func sidePanelEntry(sessionToken: String) -> String {
+    public static func sidePanelEntry(
+        sessionToken: String,
+        browserURL: String? = nil,
+        browserFirst: Bool = false
+    ) -> String {
         let token = javaScriptLiteral(sessionToken)
         let binding = javaScriptLiteral(mainBindingName)
+        let url = javaScriptLiteral(browserURL ?? "")
         return """
         (() => {
           const marker = 'data-codex-inner-ide-entry';
           const bindingName = \(binding);
           const sessionToken = \(token);
+          const browserURL = \(url);
+          const browserFirst = \(browserFirst ? "true" : "false");
           const randomId = () => {
             if (typeof globalThis.crypto?.randomUUID === 'function') return globalThis.crypto.randomUUID();
             const bytes = new Uint8Array(16);
@@ -51,12 +58,16 @@ public enum InjectionScripts {
             row.addEventListener('click', () => {
               const call = window[bindingName];
               if (typeof call !== 'function') return;
+              const clientId = randomId();
+              if (browserFirst && browserURL) {
+                window.open(`${browserURL}:${clientId}`, 'codex-inner-ide');
+              }
               call(JSON.stringify({
                 version: 1,
                 requestId: randomId(),
                 sessionToken,
                 method: 'window.openIde',
-                params: { taskKey: location.href }
+                params: { taskKey: location.href, clientId, browserAttempted: browserFirst && !!browserURL }
               }));
             });
             files.insertAdjacentElement('afterend', row);
@@ -217,6 +228,7 @@ public enum InjectionScripts {
           };
           window.codexInnerIdeHost = { v1: {
             apiVersion: '1',
+            hostMode: 'native',
             workspace: {
               current: () => call('workspace.current'),
               choose: () => call('workspace.choose'),
@@ -275,11 +287,227 @@ public enum InjectionScripts {
             window: {
               setDirty: (dirty) => { void call('window.setDirty', { dirty }); },
               setPinned: (pinned) => { void call('window.setPinned', { pinned }); },
+              updateActiveContext: (context, clientId) => { void call('window.updateActiveContext', { context, clientId }); },
               loadState: () => call('window.loadState'),
               saveState: (state) => call('window.saveState', state),
               closeIde: () => call('window.closeIde')
             }
           }};
+          return true;
+        })()
+        """
+    }
+
+    public static func browserBridgeBootstrap() -> String {
+        """
+        (() => {
+          const tokenKey = 'codex-inner-ide-session-v1';
+          const clientKey = 'codex-inner-ide-client-v1';
+          const fragment = decodeURIComponent(location.hash.replace(/^#/, ''));
+          const separator = fragment.indexOf(':');
+          const fragmentToken = separator >= 0 ? fragment.slice(0, separator) : fragment;
+          const fragmentClientId = separator >= 0 ? fragment.slice(separator + 1) : '';
+          if (fragmentToken) {
+            sessionStorage.setItem(tokenKey, fragmentToken);
+            history.replaceState(null, '', location.pathname + location.search);
+          }
+          const sessionToken = sessionStorage.getItem(tokenKey) || '';
+          const randomId = () => {
+            if (typeof globalThis.crypto?.randomUUID === 'function') return globalThis.crypto.randomUUID();
+            const bytes = new Uint8Array(16);
+            globalThis.crypto?.getRandomValues?.(bytes);
+            return [...bytes].map((value) => value.toString(16).padStart(2, '0')).join('');
+          };
+          let clientId = fragmentClientId || sessionStorage.getItem(clientKey);
+          if (!clientId) {
+            clientId = randomId();
+            sessionStorage.setItem(clientKey, clientId);
+          }
+          const listeners = new Map();
+          const subscribe = (type, listener) => {
+            const values = listeners.get(type) || new Set();
+            values.add(listener);
+            listeners.set(type, values);
+            return () => values.delete(listener);
+          };
+          const emit = (event) => {
+            for (const listener of listeners.get(event.type) || []) listener(event.payload);
+          };
+          const showDisconnected = () => {
+            if (document.querySelector('[data-codex-ide-disconnected]')) return;
+            const notice = document.createElement('div');
+            notice.setAttribute('data-codex-ide-disconnected', 'true');
+            notice.setAttribute('role', 'alert');
+            notice.style.cssText = 'position:fixed;z-index:2147483647;inset:16px 16px auto auto;max-width:360px;padding:12px 14px;border:1px solid #d16b5b;border-radius:10px;background:#fff7f5;color:#702d22;font:13px -apple-system,BlinkMacSystemFont,sans-serif;box-shadow:0 8px 28px rgba(0,0,0,.18)';
+            notice.innerHTML = '<strong style="display:block;margin-bottom:4px">IDE service disconnected</strong><span>Keep the Companion App running, then reopen IDE.</span><button type="button" style="display:block;margin-top:8px">Reopen IDE</button>';
+            notice.querySelector('button')?.addEventListener('click', () => location.reload());
+            document.body.appendChild(notice);
+          };
+          const clearDisconnected = () => document.querySelector('[data-codex-ide-disconnected]')?.remove();
+          const headers = (json = false) => ({
+            ...(json ? { 'Content-Type': 'application/json' } : {}),
+            'X-Codex-IDE-Token': sessionToken,
+            'X-Codex-IDE-Client': clientId
+          });
+          const call = async (method, params = {}) => {
+            if (!sessionToken) throw new Error('IDE session expired. Reopen IDE from Codex.');
+            const requestId = randomId();
+            const response = await fetch('/api/v1/rpc', {
+              method: 'POST',
+              cache: 'no-store',
+              credentials: 'same-origin',
+              headers: headers(true),
+              body: JSON.stringify({ version: 1, requestId, sessionToken, clientId, method, params })
+            });
+            if (!response.ok) throw new Error(`IDE bridge rejected the request (${response.status})`);
+            const value = await response.json();
+            if (value.ok) return value.data;
+            const error = new Error(value.error?.message || 'Bridge request failed');
+            error.name = value.error?.code === 'file_changed' ? 'FileChangedError' : 'InnerIDEBridgeError';
+            error.code = value.error?.code;
+            throw error;
+          };
+          let streamGeneration = 0;
+          const connectEvents = async () => {
+            const generation = ++streamGeneration;
+            let failures = 0;
+            while (generation === streamGeneration) {
+              try {
+                const response = await fetch('/api/v1/events', {
+                  cache: 'no-store',
+                  credentials: 'same-origin',
+                  headers: headers(false)
+                });
+                if (!response.ok || !response.body) throw new Error(`Event stream failed (${response.status})`);
+                failures = 0;
+                clearDisconnected();
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let buffered = '';
+                while (generation === streamGeneration) {
+                  const result = await reader.read();
+                  if (result.done) throw new Error('Event stream closed');
+                  buffered += decoder.decode(result.value, { stream: true });
+                  const lines = buffered.split('\\n');
+                  buffered = lines.pop() || '';
+                  for (const line of lines) {
+                    if (!line.trim()) continue;
+                    const event = JSON.parse(line);
+                    if (event.type === 'window.saveAllRequested'
+                      && (!event.payload?.clientId || event.payload.clientId === clientId)) {
+                      const saved = await Promise.resolve(window.__codexInnerIdeRequestSaveAll?.() ?? false);
+                      void call('window.saveAllResponse', {
+                        requestId: event.payload?.requestId,
+                        saved
+                      });
+                    } else {
+                      emit(event);
+                    }
+                  }
+                }
+              } catch {
+                failures += 1;
+                if (failures >= 3) showDisconnected();
+                await new Promise((resolve) => setTimeout(resolve, Math.min(5000, failures * 750)));
+              }
+            }
+          };
+          window.codexInnerIdeHost = { v1: {
+            apiVersion: '1',
+            hostMode: 'browser',
+            workspace: {
+              current: () => call('workspace.current'),
+              choose: () => call('workspace.choose'),
+              recent: () => call('workspace.recent'),
+              openRecent: (id) => call('workspace.openRecent', { id }),
+              removeRecent: (id) => call('workspace.removeRecent', { id }),
+              relocateRecent: (id) => call('workspace.relocateRecent', { id })
+            },
+            files: {
+              list: (path = '') => call('files.list', { relativePath: path }),
+              read: (path) => call('files.read', { relativePath: path }),
+              write: (request) => call('files.write', request),
+              create: (request) => call('files.create', request),
+              rename: (request) => call('files.rename', request),
+              trash: (path) => call('files.trash', { relativePath: path }),
+              watch: (listener) => subscribe('files.changed', listener)
+            },
+            python: {
+              discover: () => call('python.discover'),
+              createVenv: () => call('python.createVenv'),
+              run: (path, interpreterId) => call('python.run', { relativePath: path, interpreterId }),
+              checkSyntax: (path, interpreterId) => call('python.checkSyntax', { relativePath: path, interpreterId }),
+              terminate: (runId) => call('python.terminate', { runId }),
+              subscribe: (listener) => subscribe('python.event', listener)
+            },
+            runtime: {
+              discover: (languageId) => call('runtime.discover', { languageId }),
+              execute: (request) => call('runtime.execute', request),
+              check: (request) => call('runtime.check', request),
+              terminate: (runId) => call('runtime.terminate', { runId }),
+              subscribe: (listener) => subscribe('runtime.event', listener)
+            },
+            preview: {
+              open: (request) => call('preview.open', request),
+              openExternal: (request) => call('preview.openExternal', request)
+            },
+            preferences: {
+              load: () => call('preferences.load'),
+              save: (preferences) => call('preferences.save', preferences)
+            },
+            chatgpt: {
+              moreDetails: (context) => call('chatgpt.moreDetails', context)
+            },
+            edits: {
+              request: async (request) => {
+                const getContext = window.__codexInnerIdeGetActiveEditContext;
+                if (typeof getContext !== 'function') throw new Error('The editor context is not ready');
+                const context = await getContext(request.instruction, request.scope || 'auto');
+                if (!context) throw new Error('Open an editable Python file before requesting a proposal');
+                return call('edits.request', { instruction: request.instruction, scope: context.scope, context });
+              },
+              cancel: (proposalId) => call('edits.cancel', { proposalId }),
+              decide: (proposalId, decision) => call('edits.decide', { proposalId, decision }),
+              subscribe: (listener) => subscribe('edits.event', listener)
+            },
+            window: {
+              setDirty: (dirty) => { void call('window.setDirty', { dirty }); },
+              setPinned: () => {},
+              updateActiveContext: (context, requestedClientId) => {
+                void call('window.updateActiveContext', { context, clientId: requestedClientId || clientId });
+              },
+              loadState: () => call('window.loadState'),
+              saveState: (state) => call('window.saveState', state),
+              closeIde: async () => {
+                await call('window.closeIde');
+                window.close();
+              }
+            }
+          }};
+          void connectEvents();
+          void call('window.clientReady', { clientId });
+          const heartbeat = window.setInterval(() => {
+            void call('window.heartbeat', { clientId }).catch(showDisconnected);
+          }, 10000);
+          window.addEventListener('pagehide', () => {
+            window.clearInterval(heartbeat);
+            streamGeneration += 1;
+            void fetch('/api/v1/rpc', {
+              method: 'POST',
+              keepalive: true,
+              cache: 'no-store',
+              credentials: 'same-origin',
+              headers: headers(true),
+              body: JSON.stringify({
+                version: 1,
+                requestId: randomId(),
+                sessionToken,
+                clientId,
+                method: 'window.disconnect',
+                params: { clientId }
+              })
+            });
+          });
           return true;
         })()
         """

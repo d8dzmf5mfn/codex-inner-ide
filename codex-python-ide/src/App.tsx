@@ -348,6 +348,18 @@ function InnerIde({ host }: { host: CodexInnerIdeHostV1 }) {
   }, [activePath, activeSelection, loaded]);
 
   useEffect(() => {
+    if (host.hostMode !== "browser") return;
+    const timer = window.setTimeout(() => {
+      const getter = window.__codexInnerIdeGetActiveEditContext;
+      if (typeof getter !== "function") return;
+      void getter("status", "auto")
+        .then((context) => host.window.updateActiveContext(context))
+        .catch(() => undefined);
+    }, 180);
+    return () => window.clearTimeout(timer);
+  }, [activePath, activeSelection, documents, host]);
+
+  useEffect(() => {
     if (!proposal || (proposal.state !== "generating" && proposal.state !== "ready")) return;
     const document = documents.find((item) => item.relativePath === proposal.relativePath);
     if (!document) {
@@ -601,6 +613,7 @@ function InnerIde({ host }: { host: CodexInnerIdeHostV1 }) {
         running={running}
         pinned={pinned}
         sidebarCollapsed={sidebarCollapsed}
+        hostMode={host.hostMode}
         onSelectRuntime={(id) => setSelectedRuntimeIds((current) => ({
           ...current,
           [activeLanguage.id]: id

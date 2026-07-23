@@ -4,6 +4,12 @@ import Foundation
 
 @MainActor
 final class ControllerCoordinator: IDEWindowControllerDelegate {
+    private struct BrowserClient {
+        var dirty = false
+        var context: ActivePythonEditContext?
+        var lastSeen = Date()
+    }
+
     private let launcher = CodexLauncher()
     private let workspaceStateStore = WorkspaceStateStore()
     private let recentWorkspaceStore = RecentWorkspaceStore()
@@ -28,8 +34,12 @@ final class ControllerCoordinator: IDEWindowControllerDelegate {
     private var pythonEditService: PythonEditService?
     private var pythonUnavailableReason: String?
     private var localBridgeServer: LocalBridgeServer?
+    private var ideWebServer: IDEWebServer?
 
     private var dirty = false
+    private var browserClients: [String: BrowserClient] = [:]
+    private var pendingBrowserSaveRequests: [String: CheckedContinuation<Bool, Never>] = [:]
+    private var browserFallbackReason: String?
     private var activeRuntimeRunID: String?
     private var activeTaskKey = ""
     private var boundTaskKey = ""
@@ -64,12 +74,14 @@ final class ControllerCoordinator: IDEWindowControllerDelegate {
         }
 
         do {
+            if integrationError == nil, await openBrowserIDE(taskKey: activeTaskKey) {
+                return
+            }
             try await openIDEWindow(taskKey: activeTaskKey)
             if let integrationError {
-                presentMessage(
-                    "Codex integration unavailable",
-                    detail: "The IDE is open, but the Sidepanel and chat handoff are disabled.\n\n\(integrationError.localizedDescription)"
-                )
+                await presentIntegrationFallback(integrationError)
+            } else if let browserFallbackReason {
+                await presentBrowserFallback(reason: browserFallbackReason)
             }
         } catch {
             present(error)
@@ -80,10 +92,11 @@ final class ControllerCoordinator: IDEWindowControllerDelegate {
         guard let url = selectWorkspaceDirectory() else { return }
 
         do {
-            if ideWindowController != nil {
+            if ideWindowController != nil || !browserClients.isEmpty {
                 guard await closeIDE(requireDirtyConfirmation: true) else { return }
             }
             try bindWorkspace(url, taskKey: activeTaskKey)
+            if await openBrowserIDE(taskKey: activeTaskKey) { return }
             try await openIDEWindow(taskKey: activeTaskKey)
         } catch {
             present(error)
@@ -92,6 +105,8 @@ final class ControllerCoordinator: IDEWindowControllerDelegate {
 
     func prepareForTermination() async -> Bool {
         guard await closeIDE(requireDirtyConfirmation: true) else { return false }
+        ideWebServer?.stop()
+        ideWebServer = nil
         localBridgeServer?.stop()
         localBridgeServer = nil
         mainEventsTask?.cancel()
@@ -113,18 +128,109 @@ final class ControllerCoordinator: IDEWindowControllerDelegate {
         }
     }
 
+    private func handleBrowserBridge(_ request: BridgeRequest) async -> BridgeResponse {
+        do {
+            guard request.version == 1,
+                  request.sessionToken == sessionToken,
+                  let clientId = request.clientId,
+                  request.params["clientId"]?.stringValue.map({ $0 == clientId }) ?? true
+            else { throw InnerIDEError.bridgeRejected("invalid Browser bridge session") }
+
+            switch request.method {
+            case "window.clientReady":
+                browserClients[clientId, default: BrowserClient()].lastSeen = Date()
+                ideWebServer?.markReady(clientId: clientId)
+                return .success(request.requestId)
+            case "window.heartbeat":
+                browserClients[clientId, default: BrowserClient()].lastSeen = Date()
+                return .success(request.requestId)
+            case "window.disconnect":
+                browserClients.removeValue(forKey: clientId)
+                ideWebServer?.markDisconnected(clientId: clientId)
+                return .success(request.requestId)
+            case "window.saveAllResponse":
+                guard let saveRequestID = request.params["requestId"]?.stringValue else {
+                    throw InnerIDEError.bridgeRejected("Save All response id is missing")
+                }
+                let continuation = pendingBrowserSaveRequests.removeValue(forKey: saveRequestID)
+                continuation?.resume(returning: request.params["saved"]?.boolValue == true)
+                return .success(request.requestId)
+            default:
+                browserClients[clientId, default: BrowserClient()].lastSeen = Date()
+                try await prepareIDERuntime(taskKey: activeTaskKey)
+                return .success(request.requestId, data: try await route(request))
+            }
+        } catch {
+            return .failure(request.requestId, error: error)
+        }
+    }
+
+    private func loadRendererAssets() throws -> RendererAssets {
+        if let rendererAssets { return rendererAssets }
+        guard let resources = Bundle.main.resourceURL else {
+            throw InnerIDEError.rendererAssetsMissing
+        }
+        let assets = try RendererAssets.load(from: resources)
+        rendererAssets = assets
+        return assets
+    }
+
+    private func ensureBrowserServer() async throws -> URL {
+        if let url = ideWebServer?.pageURL { return url }
+        let assets = try loadRendererAssets()
+        let server = IDEWebServer(
+            rendererAssets: assets,
+            sessionToken: sessionToken
+        ) { [weak self] request in
+            guard let self else {
+                return .failure(
+                    request.requestId,
+                    error: InnerIDEError.localBridgeUnavailable("controller stopped")
+                )
+            }
+            return await self.handleBrowserBridge(request)
+        }
+        let url = try await server.start()
+        ideWebServer = server
+        return url
+    }
+
+    private var browserFirstCompatible: Bool {
+        compatibilityProfile?.appVersion == "26.715.72359"
+    }
+
+    private func openBrowserIDE(taskKey: String) async -> Bool {
+        guard browserFirstCompatible, let mainSession else { return false }
+        browserFallbackReason = nil
+        do {
+            try await prepareIDERuntime(taskKey: taskKey)
+            let baseURL = try await ensureBrowserServer()
+            let clientId = UUID().uuidString.lowercased()
+            let targetURL = "\(baseURL.absoluteString):\(clientId)"
+            let opened = try await mainSession.evaluate(
+                "window.open(\(InjectionScripts.javaScriptLiteral(targetURL)), 'codex-inner-ide') !== null"
+            ).boolValue == true
+            guard opened, await ideWebServer?.waitUntilReady(clientId: clientId) == true else {
+                browserFallbackReason = "The Codex Browser did not complete the local IDE handshake."
+                return false
+            }
+            return true
+        } catch {
+            browserFallbackReason = error.localizedDescription
+            return false
+        }
+    }
+
     private func routeLocalBridge(_ request: BridgeRequest) async throws -> JSONValue {
         switch request.method {
         case "mcp.status":
-            guard let controller = ideWindowController,
-                  let context = await controller.requestActiveEditContext(
-                    instruction: "status",
-                    scope: .auto
-                  )
-            else {
+            guard let context = await currentEditContext(
+                instruction: "status",
+                scope: .auto
+            ) else {
                 return .object([
                     "connected": .bool(true),
-                    "ideOpen": .bool(ideWindowController != nil)
+                    "ideOpen": .bool(ideWindowController != nil || !browserClients.isEmpty)
                 ])
             }
             var result: [String: JSONValue] = [
@@ -145,12 +251,10 @@ final class ControllerCoordinator: IDEWindowControllerDelegate {
                   let scope = PythonEditScope(rawValue: request.params["scope"]?.stringValue ?? "auto")
             else { throw InnerIDEError.proposalInvalid("instruction or scope is missing") }
             if installation == nil { installation = try? CodexInstallation.detect() }
-            if ideWindowController == nil {
+            if ideWindowController == nil, browserClients.values.allSatisfy({ $0.context == nil }) {
                 try await openIDEWindow(taskKey: activeTaskKey)
             }
-            guard let controller = ideWindowController,
-                  let context = await waitForActiveEditContext(
-                    controller: controller,
+            guard let context = await currentEditContext(
                     instruction: instruction,
                     scope: scope
                   ),
@@ -169,6 +273,37 @@ final class ControllerCoordinator: IDEWindowControllerDelegate {
         default:
             throw InnerIDEError.bridgeRejected("unknown local method: \(request.method)")
         }
+    }
+
+    private func currentEditContext(
+        instruction: String,
+        scope: PythonEditScope
+    ) async -> ActivePythonEditContext? {
+        if let controller = ideWindowController,
+           let context = await waitForActiveEditContext(
+               controller: controller,
+               instruction: instruction,
+               scope: scope
+           ) {
+            return context
+        }
+        guard let stored = browserClients.values
+            .filter({ $0.context != nil })
+            .max(by: { $0.lastSeen < $1.lastSeen })?
+            .context
+        else { return nil }
+        let resolvedScope: PythonEditScope = scope == .auto ? stored.scope : scope
+        if resolvedScope == .selection, stored.range == nil { return nil }
+        return ActivePythonEditContext(
+            workspaceId: stored.workspaceId,
+            relativePath: stored.relativePath,
+            scope: resolvedScope,
+            range: resolvedScope == .selection ? stored.range : nil,
+            bufferContent: stored.bufferContent,
+            bufferDigest: stored.bufferDigest,
+            instruction: instruction,
+            readonly: stored.readonly
+        )
     }
 
     private func waitForActiveEditContext(
@@ -210,31 +345,45 @@ final class ControllerCoordinator: IDEWindowControllerDelegate {
 
     func ideWindowControllerShouldClose(_ controller: IDEWindowController) async -> Bool {
         guard controller === ideWindowController else { return true }
-        guard await confirmIDEClosure(controller) else { return false }
-        await stopIDERuntime()
+        if dirty {
+            guard await confirmIDEClosure(
+                controller: controller,
+                includeBrowserClients: false
+            ) else { return false }
+        }
         ideWindowController = nil
         dirty = false
+        if browserClients.isEmpty {
+            await stopIDERuntime()
+        }
         return true
     }
 
     @discardableResult
     private func closeIDE(requireDirtyConfirmation: Bool) async -> Bool {
-        guard let controller = ideWindowController else {
-            await stopIDERuntime()
-            return true
-        }
         if requireDirtyConfirmation {
-            guard await confirmIDEClosure(controller) else { return false }
+            guard await confirmIDEClosure(
+                controller: ideWindowController,
+                includeBrowserClients: true
+            ) else { return false }
         }
         await stopIDERuntime()
+        let controller = ideWindowController
         ideWindowController = nil
         dirty = false
-        controller.closeImmediately()
+        browserClients.removeAll()
+        controller?.closeImmediately()
         return true
     }
 
-    private func confirmIDEClosure(_ controller: IDEWindowController) async -> Bool {
-        guard dirty else { return true }
+    private func confirmIDEClosure(
+        controller: IDEWindowController?,
+        includeBrowserClients: Bool
+    ) async -> Bool {
+        let dirtyBrowserClientIDs = includeBrowserClients
+            ? browserClients.filter(\.value.dirty).map(\.key)
+            : []
+        guard dirty || !dirtyBrowserClientIDs.isEmpty else { return true }
         let alert = NSAlert()
         alert.messageText = "The IDE has unsaved files."
         alert.informativeText = "Save all files, discard the editor changes, or cancel."
@@ -243,13 +392,44 @@ final class ControllerCoordinator: IDEWindowControllerDelegate {
         alert.addButton(withTitle: "Cancel")
         switch alert.runModal() {
         case .alertFirstButtonReturn:
-            let saved = await controller.requestSaveAll()
-            if saved { dirty = false }
-            return saved
+            if dirty {
+                guard let controller, await controller.requestSaveAll() else { return false }
+            }
+            for clientId in dirtyBrowserClientIDs {
+                guard await requestBrowserSaveAll(clientId: clientId) else { return false }
+            }
+            dirty = false
+            for clientId in dirtyBrowserClientIDs {
+                browserClients[clientId]?.dirty = false
+            }
+            return true
         case .alertSecondButtonReturn:
             return true
         default:
             return false
+        }
+    }
+
+    private func requestBrowserSaveAll(
+        clientId: String,
+        timeout: Duration = .seconds(15)
+    ) async -> Bool {
+        let requestId = UUID().uuidString.lowercased()
+        return await withCheckedContinuation { continuation in
+            pendingBrowserSaveRequests[requestId] = continuation
+            ideWebServer?.emit(
+                type: "window.saveAllRequested",
+                payload: .object([
+                    "requestId": .string(requestId),
+                    "clientId": .string(clientId)
+                ])
+            )
+            Task { [weak self] in
+                try? await Task.sleep(for: timeout)
+                guard let continuation = self?.pendingBrowserSaveRequests.removeValue(forKey: requestId)
+                else { return }
+                continuation.resume(returning: false)
+            }
         }
     }
 
@@ -264,18 +444,10 @@ final class ControllerCoordinator: IDEWindowControllerDelegate {
             }
         }
 
-        if workspace == nil { try await resolveWorkspace(taskKey: taskKey) }
-        guard let workspace else { throw InnerIDEError.workspaceUnavailable }
-
-        if rendererAssets == nil {
-            guard let resources = Bundle.main.resourceURL else {
-                throw InnerIDEError.rendererAssetsMissing
-            }
-            rendererAssets = try RendererAssets.load(from: resources)
+        try await prepareIDERuntime(taskKey: taskKey)
+        guard let workspace, let rendererAssets else {
+            throw InnerIDEError.workspaceUnavailable
         }
-        guard let rendererAssets else { throw InnerIDEError.rendererAssetsMissing }
-
-        await startPythonRuntime(workspace)
         let controller = IDEWindowController(
             rendererAssets: rendererAssets,
             sessionToken: sessionToken,
@@ -283,9 +455,26 @@ final class ControllerCoordinator: IDEWindowControllerDelegate {
         )
         controller.delegate = self
         ideWindowController = controller
-        boundTaskKey = taskKey
-        try startWatcher(workspace)
         controller.present()
+    }
+
+    private func prepareIDERuntime(taskKey: String) async throws {
+        if workspace != nil, !taskKey.isEmpty, !boundTaskKey.isEmpty, taskKey != boundTaskKey {
+            guard await closeIDE(requireDirtyConfirmation: true) else {
+                throw InnerIDEError.commandFailed("Workspace switch cancelled")
+            }
+            workspace = nil
+        }
+        if workspace == nil { try await resolveWorkspace(taskKey: taskKey) }
+        guard let workspace else { throw InnerIDEError.workspaceUnavailable }
+        _ = try loadRendererAssets()
+        if previewService == nil {
+            await startPythonRuntime(workspace)
+        }
+        if watcher == nil {
+            try startWatcher(workspace)
+        }
+        boundTaskKey = taskKey
     }
 
     private func startPythonRuntime(_ workspace: WorkspaceService) async {
@@ -400,8 +589,15 @@ final class ControllerCoordinator: IDEWindowControllerDelegate {
         guard compatibilityProfile != nil,
               let mainSession
         else { throw InnerIDEError.cdpUnavailable("main renderer integration is disabled") }
+        let browserURL = browserFirstCompatible
+            ? try? await ensureBrowserServer()
+            : nil
         return try await mainSession.evaluate(
-            InjectionScripts.sidePanelEntry(sessionToken: sessionToken)
+            InjectionScripts.sidePanelEntry(
+                sessionToken: sessionToken,
+                browserURL: browserURL?.absoluteString,
+                browserFirst: browserURL != nil
+            )
         ).boolValue == true
     }
 
@@ -431,7 +627,18 @@ final class ControllerCoordinator: IDEWindowControllerDelegate {
         else { return }
         activeTaskKey = request.params["taskKey"]?.stringValue ?? ""
         do {
+            try await prepareIDERuntime(taskKey: activeTaskKey)
+            let browserAttempted = request.params["browserAttempted"]?.boolValue == true
+            if browserAttempted, let clientId = request.params["clientId"]?.stringValue {
+                if await ideWebServer?.waitUntilReady(clientId: clientId) == true {
+                    return
+                }
+                browserFallbackReason = "The Codex Browser did not complete the local IDE handshake."
+            }
             try await openIDEWindow(taskKey: activeTaskKey)
+            if browserAttempted, let browserFallbackReason {
+                await presentBrowserFallback(reason: browserFallbackReason)
+            }
         } catch {
             present(error)
         }
@@ -697,10 +904,27 @@ final class ControllerCoordinator: IDEWindowControllerDelegate {
             try await pythonEditService.decide(request.params.decode(PythonEditDecision.self))
             return .object([:])
         case "window.setDirty":
-            dirty = request.params["dirty"]?.boolValue == true
+            if let clientId = request.clientId {
+                browserClients[clientId, default: BrowserClient()].dirty =
+                    request.params["dirty"]?.boolValue == true
+            } else {
+                dirty = request.params["dirty"]?.boolValue == true
+            }
             return .object([:])
         case "window.setPinned":
             ideWindowController?.setPinned(request.params["pinned"]?.boolValue == true)
+            return .object([:])
+        case "window.updateActiveContext":
+            guard let clientId = request.clientId,
+                  let value = request.params["context"]
+            else { throw InnerIDEError.bridgeRejected("Browser edit context is missing") }
+            if value == .null {
+                browserClients[clientId, default: BrowserClient()].context = nil
+            } else {
+                browserClients[clientId, default: BrowserClient()].context =
+                    try value.decode(ActivePythonEditContext.self)
+            }
+            browserClients[clientId]?.lastSeen = Date()
             return .object([:])
         case "window.loadState":
             return try workspaceStateStore.loadWindowState(workspaceID: workspace.binding.id)
@@ -708,8 +932,22 @@ final class ControllerCoordinator: IDEWindowControllerDelegate {
             try workspaceStateStore.saveWindowState(request.params, workspaceID: workspace.binding.id)
             return .object([:])
         case "window.closeIde":
-            Task { [weak self] in
-                _ = await self?.closeIDE(requireDirtyConfirmation: true)
+            if let clientId = request.clientId {
+                guard await confirmIDEClosure(
+                    controller: nil,
+                    includeBrowserClients: true
+                ) else {
+                    throw InnerIDEError.commandFailed("Close cancelled")
+                }
+                browserClients.removeValue(forKey: clientId)
+                ideWebServer?.markDisconnected(clientId: clientId)
+                if ideWindowController == nil, browserClients.isEmpty {
+                    await stopIDERuntime()
+                }
+            } else {
+                Task { [weak self] in
+                    _ = await self?.closeIDE(requireDirtyConfirmation: true)
+                }
             }
             return .object([:])
         default:
@@ -836,8 +1074,10 @@ final class ControllerCoordinator: IDEWindowControllerDelegate {
             _ = try recentWorkspaceStore.record(next.rootURL)
             return next.binding
         }
-        if let controller = ideWindowController,
-           !(await confirmIDEClosure(controller)) {
+        if !(await confirmIDEClosure(
+            controller: ideWindowController,
+            includeBrowserClients: true
+        )) {
             guard let current = workspace else { throw InnerIDEError.workspaceUnavailable }
             return current.binding
         }
@@ -851,6 +1091,12 @@ final class ControllerCoordinator: IDEWindowControllerDelegate {
             workspaceStateStore.recordWorkspace(next.rootURL, taskKey: activeTaskKey)
             _ = try recentWorkspaceStore.record(next.rootURL)
             dirty = false
+            browserClients = browserClients.mapValues { client in
+                var value = client
+                value.dirty = false
+                value.context = nil
+                return value
+            }
             return next.binding
         } catch {
             await stopIDERuntime()
@@ -936,6 +1182,7 @@ final class ControllerCoordinator: IDEWindowControllerDelegate {
     private func emit(type: String, payload: JSONValue?) async {
         guard let payload else { return }
         ideWindowController?.emit(type: type, payload: payload)
+        ideWebServer?.emit(type: type, payload: payload)
     }
 
     private func confirmVenvCreation() -> Bool {
@@ -992,6 +1239,47 @@ final class ControllerCoordinator: IDEWindowControllerDelegate {
 
     private func present(_ error: Error) {
         presentMessage("Codex Inner IDE", detail: error.localizedDescription)
+    }
+
+    private func presentIntegrationFallback(_ error: Error) async {
+        let url = try? await ensureBrowserServer()
+        let detail = """
+        The native IDE is open, but the Sidepanel and chat handoff are disabled.
+
+        \(error.localizedDescription)
+        \(url.map { "\nLocal IDE URL: \($0.absoluteString)" } ?? "")
+        """
+        presentCopyableFallback(
+            title: "Codex integration unavailable",
+            detail: detail,
+            url: url
+        )
+    }
+
+    private func presentBrowserFallback(reason: String) async {
+        let url = try? await ensureBrowserServer()
+        presentCopyableFallback(
+            title: "Opened the native IDE",
+            detail: """
+            Browser mode was unavailable, so Codex Inner IDE used the native window.
+
+            \(reason)
+            \(url.map { "\nLocal IDE URL: \($0.absoluteString)" } ?? "")
+            """,
+            url: url
+        )
+    }
+
+    private func presentCopyableFallback(title: String, detail: String, url: URL?) {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = detail
+        alert.addButton(withTitle: "Continue")
+        if url != nil { alert.addButton(withTitle: "Copy Local IDE URL") }
+        if alert.runModal() == .alertSecondButtonReturn, let url {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(url.absoluteString, forType: .string)
+        }
     }
 
     private func presentMessage(_ title: String, detail: String) {

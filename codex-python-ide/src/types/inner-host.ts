@@ -202,6 +202,7 @@ export type Unsubscribe = () => void;
 
 export interface CodexInnerIdeHostV1 {
   readonly apiVersion: "1";
+  readonly hostMode: "native" | "browser" | "mock";
   workspace: {
     current(): Promise<WorkspaceBinding>;
     choose(): Promise<WorkspaceBinding>;
@@ -257,6 +258,7 @@ export interface CodexInnerIdeHostV1 {
   window: {
     setDirty(dirty: boolean): void;
     setPinned(pinned: boolean): void;
+    updateActiveContext(context: ActivePythonEditContext | null, clientId?: string): void;
     loadState(): Promise<IdeWindowState | null>;
     saveState(state: IdeWindowState): Promise<void>;
     closeIde(): Promise<void>;

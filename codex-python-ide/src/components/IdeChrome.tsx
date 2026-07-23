@@ -29,6 +29,7 @@ type IdeTitleBarProps = {
   running: boolean;
   pinned: boolean;
   sidebarCollapsed: boolean;
+  hostMode: "native" | "browser" | "mock";
   onSelectRuntime: (id: string) => void;
   onCreateVenv: () => void;
   onSave: () => void;
@@ -50,6 +51,7 @@ export function IdeTitleBar({
   running,
   pinned,
   sidebarCollapsed,
+  hostMode,
   onSelectRuntime,
   onCreateVenv,
   onSave,
@@ -135,16 +137,18 @@ export function IdeTitleBar({
             aria-hidden="true"
           />
         </button>
-        <button
-          type="button"
-          className={pinned ? "pin-button pin-button-active" : "pin-button"}
-          aria-label={pinned ? "Unpin IDE window" : "Pin IDE window on top"}
-          aria-pressed={pinned}
-          title={pinned ? "Unpin window" : "Keep window on top"}
-          onClick={onTogglePin}
-        >
-          {pinned ? <PinOff size={15} aria-hidden="true" /> : <Pin size={15} aria-hidden="true" />}
-        </button>
+        {hostMode !== "browser" && (
+          <button
+            type="button"
+            className={pinned ? "pin-button pin-button-active" : "pin-button"}
+            aria-label={pinned ? "Unpin IDE window" : "Pin IDE window on top"}
+            aria-pressed={pinned}
+            title={pinned ? "Unpin window" : "Keep window on top"}
+            onClick={onTogglePin}
+          >
+            {pinned ? <PinOff size={15} aria-hidden="true" /> : <Pin size={15} aria-hidden="true" />}
+          </button>
+        )}
         <button type="button" aria-label="Close IDE" onClick={onClose}><X size={15} /></button>
       </div>
     </header>
