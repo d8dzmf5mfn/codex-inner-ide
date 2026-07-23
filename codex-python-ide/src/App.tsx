@@ -13,7 +13,14 @@ import { FileTree } from "./components/FileTree";
 import { EditRequestBar, IdeTitleBar, StatusNotice } from "./components/IdeChrome";
 import { OutputPanel } from "./components/OutputPanel";
 import { PreviewPane } from "./components/PreviewPane";
+import { CompletionSnippetDialog } from "./components/CompletionSnippetDialog";
 import { digestText } from "./core/edits";
+import {
+  completionIndex,
+  indexWorkspace,
+  setUserCompletionSnippets,
+  updateCompletionIndexFromChange
+} from "./core/completions";
 import {
   languageForPath,
   preferredInitialFilePath,
@@ -31,6 +38,7 @@ import type {
   FileEntry,
   FileKind,
   FileSnapshot,
+  GlobalPreferences,
   IdeSelectionContext,
   PythonEditProposal,
   PythonEditScope,
@@ -86,6 +94,11 @@ function InnerIde({ host }: { host: CodexInnerIdeHostV1 }) {
   const [proposal, setProposal] = useState<PythonEditProposal | null>(null);
   const [proposalMessage, setProposalMessage] = useState<string | null>(null);
   const [pinned, setPinned] = useState(false);
+  const [globalPreferences, setGlobalPreferences] = useState<GlobalPreferences>({
+    themeMode: "auto",
+    completionSnippets: []
+  });
+  const [snippetsOpen, setSnippetsOpen] = useState(false);
   const documentsRef = useRef(documents);
   const timeTheme = useTimeTheme();
   const {
@@ -143,6 +156,25 @@ function InnerIde({ host }: { host: CodexInnerIdeHostV1 }) {
   }, [host]);
 
   useEffect(() => {
+    let cancelled = false;
+    void host.preferences.load().then((preferences) => {
+      if (cancelled) return;
+      setGlobalPreferences(preferences);
+      setUserCompletionSnippets(preferences.completionSnippets);
+    }).catch((reason: unknown) => {
+      if (!cancelled) setNotice(message(reason, "Unable to load completion snippets"));
+    });
+    return () => { cancelled = true; };
+  }, [host]);
+
+  useEffect(() => {
+    if (!loaded) return;
+    void indexWorkspace(host, loaded.workspace.id).catch((reason: unknown) => {
+      setNotice(message(reason, "Workspace completion indexing is unavailable"));
+    });
+  }, [host, loaded?.workspace.id]);
+
+  useEffect(() => {
     if (!loaded) return;
     const timer = window.setTimeout(() => {
       void host.window.saveState({
@@ -158,6 +190,7 @@ function InnerIde({ host }: { host: CodexInnerIdeHostV1 }) {
   }, [activePath, bottomPanelOpen, documentViews, documents, expandedDirectories, host, loaded, pinned]);
 
   useEffect(() => host.files.watch((change) => {
+    void updateCompletionIndexFromChange(host, change);
     setTreeRevision((value) => value + 1);
     void host.files.list("").then((rootEntries) => setLoaded((current) => current ? { ...current, rootEntries } : current));
     if (change.source === "ide") return;
@@ -301,6 +334,7 @@ function InnerIde({ host }: { host: CodexInnerIdeHostV1 }) {
       setDocuments((items) => items.map((item) =>
         item.relativePath === relativePath ? markDocumentSaved(item, snapshot) : item
       ));
+      completionIndex.updateFile(snapshot);
       setConflict(null);
       setNotice(`Saved ${relativePath}`);
       const language = languageForPath(relativePath);
@@ -520,6 +554,7 @@ function InnerIde({ host }: { host: CodexInnerIdeHostV1 }) {
           setSelectedRuntimeIds((current) => ({ ...current, python: runtime.id }));
         }).catch((reason) => setError(message(reason, "Unable to create .venv")))}
         onSave={() => { if (activePath) void savePath(activePath); }}
+        onManageSnippets={() => setSnippetsOpen(true)}
         onEditCurrentFile={() => openEditComposer("file")}
         onRun={() => void runActiveFile()}
         onTogglePin={() => {
@@ -566,6 +601,7 @@ function InnerIde({ host }: { host: CodexInnerIdeHostV1 }) {
           onCreate={async (path, kind: FileKind) => { await host.files.create({ relativePath: path, kind }); refreshTree(); if (kind === "file") await openFile(path); }}
           onRename={async (from, to) => {
             await host.files.rename({ from, to });
+            completionIndex.renamePath(from, to);
             setDocuments((items) => items.map((document) => document.relativePath === from || document.relativePath.startsWith(`${from}/`)
               ? { ...document, relativePath: to + document.relativePath.slice(from.length) }
               : document));
@@ -577,6 +613,7 @@ function InnerIde({ host }: { host: CodexInnerIdeHostV1 }) {
               throw new Error("Save or discard open changes before moving this item to Trash.");
             }
             await host.files.trash(path);
+            completionIndex.removePath(path);
             setDocuments((items) => items.filter((document) => document.relativePath !== path && !document.relativePath.startsWith(`${path}/`)));
             refreshTree();
           }}
@@ -640,6 +677,18 @@ function InnerIde({ host }: { host: CodexInnerIdeHostV1 }) {
           />
         </div>
       </div>
+
+      {snippetsOpen && (
+        <CompletionSnippetDialog
+          snippets={globalPreferences.completionSnippets}
+          onClose={() => setSnippetsOpen(false)}
+          onChange={async (completionSnippets) => {
+            const saved = await host.preferences.save({ ...globalPreferences, completionSnippets });
+            setGlobalPreferences(saved);
+            setUserCompletionSnippets(saved.completionSnippets);
+          }}
+        />
+      )}
     </main>
   );
 }

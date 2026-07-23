@@ -92,6 +92,22 @@ export type PreviewDescriptor = {
   entryRelativePath?: string | null;
 };
 
+export type ThemeMode = "auto" | "light" | "dark";
+
+export type UserCompletionSnippet = {
+  id: string;
+  languageId: import("../core/languages").LanguageId;
+  triggerPrefix: string;
+  displayName: string;
+  description: string;
+  body: string;
+};
+
+export type GlobalPreferences = {
+  themeMode: ThemeMode;
+  completionSnippets: UserCompletionSnippet[];
+};
+
 export type FileChange = {
   relativePath: string;
   kind: "changed" | "created" | "deleted";
@@ -209,6 +225,10 @@ export interface CodexInnerIdeHostV1 {
   preview: {
     open(request: RuntimeExecuteRequest & { htmlEntryRelativePath?: string | null }): Promise<PreviewDescriptor>;
     openExternal(request: RuntimeExecuteRequest & { htmlEntryRelativePath?: string | null }): Promise<PreviewDescriptor>;
+  };
+  preferences: {
+    load(): Promise<GlobalPreferences>;
+    save(preferences: GlobalPreferences): Promise<GlobalPreferences>;
   };
   chatgpt: {
     moreDetails(context: IdeSelectionContext): Promise<HandoffResult>;

@@ -83,6 +83,24 @@ describe("development Inner IDE host", () => {
     await expect(host.window.loadState()).resolves.toMatchObject({ pinned: true });
   });
 
+  it("persists global completion snippets through the preferences contract", async () => {
+    const host = createMockInnerHost();
+    await host.preferences.save({
+      themeMode: "auto",
+      completionSnippets: [{
+        id: "print-debug",
+        languageId: "python",
+        triggerPrefix: "pr",
+        displayName: "Print debug value",
+        description: "Debug helper",
+        body: "print(${1:value})"
+      }]
+    });
+    await expect(host.preferences.load()).resolves.toMatchObject({
+      completionSnippets: [{ triggerPrefix: "pr", languageId: "python" }]
+    });
+  });
+
   it("emits a read-only Python proposal without writing the mock file", async () => {
     const host = createMockInnerHost();
     const before = await host.files.read("main.py");

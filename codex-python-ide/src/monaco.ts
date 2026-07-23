@@ -7,7 +7,10 @@ import "monaco-editor/languages/definitions/typescript/register.js";
 import "monaco-editor/languages/definitions/javascript/register.js";
 import "monaco-editor/languages/definitions/css/register.js";
 import "monaco-editor/languages/definitions/markdown/register.js";
+import "monaco-editor/editor/contrib/snippet/browser/snippetController2.js";
+import "monaco-editor/editor/contrib/suggest/browser/suggestController.js";
 import EditorWorker from "monaco-editor/editor/editor.worker.js?worker&inline";
+import { registerCompletionProviders } from "./core/completions";
 
 monaco.languages.register({
   id: "json",
@@ -45,5 +48,6 @@ self.MonacoEnvironment = {
 };
 
 loader.config({ monaco });
+registerCompletionProviders(monaco);
 
 export { monaco };

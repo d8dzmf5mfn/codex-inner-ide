@@ -1,5 +1,6 @@
 import { type FormEvent } from "react";
 import {
+  Braces,
   Code2,
   Moon,
   Pin,
@@ -28,6 +29,7 @@ type IdeTitleBarProps = {
   onSelectRuntime: (id: string) => void;
   onCreateVenv: () => void;
   onSave: () => void;
+  onManageSnippets: () => void;
   onEditCurrentFile: () => void;
   onRun: () => void;
   onTogglePin: () => void;
@@ -45,6 +47,7 @@ export function IdeTitleBar({
   onSelectRuntime,
   onCreateVenv,
   onSave,
+  onManageSnippets,
   onEditCurrentFile,
   onRun,
   onTogglePin,
@@ -81,6 +84,9 @@ export function IdeTitleBar({
         ) : language.id === "python" ? (
           <button type="button" onClick={onCreateVenv}>Create .venv</button>
         ) : <span className="runtime-unavailable">No runtime</span>}
+        <button type="button" onClick={onManageSnippets} title="Manage completion snippets">
+          <Braces size={15} strokeWidth={1.7} aria-hidden="true" /> Snippets
+        </button>
         <button type="button" onClick={onSave} disabled={!activeDocument?.dirty}>
           <Save size={15} strokeWidth={1.7} aria-hidden="true" /> Save
         </button>

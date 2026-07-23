@@ -4,6 +4,7 @@ import type {
   FileEntry,
   FileKind,
   FileSnapshot,
+  GlobalPreferences,
   HandoffResult,
   IdeWindowState,
   PythonExecutionEvent,
@@ -99,6 +100,7 @@ export function createMockInnerHost(): CodexInnerIdeHostV1 {
   const runtimeListeners = new Set<(event: RuntimeExecutionEvent) => void>();
   const editListeners = new Set<(event: PythonEditProposalEvent) => void>();
   let state: IdeWindowState | null = null;
+  let preferences: GlobalPreferences = { themeMode: "auto", completionSnippets: [] };
 
   const interpreter: PythonInterpreter = {
     id: "mock-python",
@@ -292,6 +294,13 @@ export function createMockInnerHost(): CodexInnerIdeHostV1 {
         };
       },
       async openExternal(request) { return this.open(request); }
+    },
+    preferences: {
+      async load() { return structuredClone(preferences); },
+      async save(next) {
+        preferences = structuredClone(next);
+        return structuredClone(preferences);
+      }
     },
     chatgpt: {
       async moreDetails() { return handoff(); }

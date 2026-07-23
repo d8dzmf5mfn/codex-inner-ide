@@ -296,6 +296,8 @@ final class ProtocolSafetyTests: XCTestCase {
         XCTAssertFalse(script.contains("codexPetIdeHost"))
         XCTAssertTrue(script.contains("edits.request"))
         XCTAssertTrue(script.contains("edits.event"))
+        XCTAssertTrue(script.contains("preferences.load"))
+        XCTAssertTrue(script.contains("preferences.save"))
         XCTAssertTrue(script.contains("__codexInnerIdeGetActiveEditContext"))
     }
 

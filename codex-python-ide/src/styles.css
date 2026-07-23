@@ -918,6 +918,184 @@ select:focus-visible {
   font-family: SFMono-Regular, Menlo, monospace;
 }
 
+.modal-backdrop {
+  position: fixed;
+  z-index: 100;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 28px;
+  background: rgba(16, 18, 22, 0.32);
+}
+
+.snippet-dialog {
+  display: grid;
+  grid-template-rows: auto minmax(100px, 220px) auto;
+  width: min(720px, 100%);
+  max-height: calc(100vh - 56px);
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: 0 22px 70px rgba(0, 0, 0, 0.22);
+}
+
+.snippet-dialog > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 18px 20px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.snippet-dialog h2,
+.snippet-dialog p {
+  margin: 0;
+}
+
+.snippet-dialog h2 {
+  font-size: 16px;
+}
+
+.snippet-dialog header p {
+  margin-top: 4px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.snippet-dialog button,
+.snippet-dialog input,
+.snippet-dialog select,
+.snippet-dialog textarea {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
+
+.snippet-dialog button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 28px;
+  cursor: pointer;
+}
+
+.snippet-dialog header > button,
+.snippet-item > button {
+  width: 28px;
+  padding: 0;
+}
+
+.snippet-list {
+  overflow: auto;
+  padding: 10px 12px;
+  background: var(--surface-subtle);
+}
+
+.snippet-empty {
+  padding: 28px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.snippet-item {
+  display: grid;
+  grid-template-columns: minmax(48px, auto) minmax(0, 1fr) 28px;
+  align-items: center;
+  gap: 10px;
+  padding: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.snippet-prefix {
+  padding: 3px 6px;
+  border-radius: 5px;
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  font-family: SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+}
+
+.snippet-item strong,
+.snippet-item small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.snippet-item strong {
+  font-size: 12px;
+}
+
+.snippet-item small {
+  margin-top: 2px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.snippet-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 12px;
+  padding: 14px 20px 18px;
+  border-top: 1px solid var(--border);
+}
+
+.snippet-form label {
+  display: grid;
+  gap: 5px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.snippet-form input,
+.snippet-form select,
+.snippet-form textarea {
+  width: 100%;
+  min-height: 30px;
+  padding: 6px 8px;
+}
+
+.snippet-body-field,
+.snippet-error,
+.snippet-add {
+  grid-column: 1 / -1;
+}
+
+.snippet-form textarea {
+  min-height: 82px;
+  resize: vertical;
+  font-family: SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
+
+.snippet-error {
+  color: #b42318;
+  font-size: 11px;
+}
+
+.snippet-dialog .snippet-add {
+  justify-self: end;
+  padding: 0 12px;
+  border-color: #2e6fb4;
+  background: #2e6fb4;
+  color: #ffffff;
+}
+
+/* Keep completion results compact: five 22px rows remain visible and the Monaco list scrolls. */
+.monaco-editor .suggest-widget:not(.message) {
+  max-height: 112px !important;
+}
+
+.monaco-editor .suggest-widget:not(.message) > .tree,
+.monaco-editor .suggest-widget:not(.message) .monaco-list {
+  max-height: 110px !important;
+}
+
 :root[data-theme="dark"] .titlebar-actions select,
 :root[data-theme="dark"] .titlebar-actions button,
 :root[data-theme="dark"] .tree-create-form,

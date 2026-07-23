@@ -249,6 +249,10 @@ public enum InjectionScripts {
               open: (request) => call('preview.open', request),
               openExternal: (request) => call('preview.openExternal', request)
             },
+            preferences: {
+              load: () => call('preferences.load'),
+              save: (preferences) => call('preferences.save', preferences)
+            },
             chatgpt: {
               moreDetails: (context) => call('chatgpt.moreDetails', context)
             },

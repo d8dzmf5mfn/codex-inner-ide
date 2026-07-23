@@ -6,6 +6,7 @@ import Foundation
 final class ControllerCoordinator: IDEWindowControllerDelegate {
     private let launcher = CodexLauncher()
     private let workspaceStateStore = WorkspaceStateStore()
+    private let globalPreferencesStore = GlobalPreferencesStore()
     private let sessionToken = UUID().uuidString.lowercased()
     private lazy var quickChatHandoffController = QuickChatHandoffController(launcher: launcher)
     private var installation: CodexInstallation?
@@ -450,6 +451,12 @@ final class ControllerCoordinator: IDEWindowControllerDelegate {
             await chooseWorkspace()
             guard let current = self.workspace else { throw InnerIDEError.workspaceUnavailable }
             return try .fromEncodable(current.binding)
+        case "preferences.load":
+            return try .fromEncodable(globalPreferencesStore.load())
+        case "preferences.save":
+            return try .fromEncodable(globalPreferencesStore.save(
+                try request.params.decode(GlobalPreferences.self)
+            ))
         case "files.list":
             return try .fromEncodable(workspace.list(
                 relativePath: request.params["relativePath"]?.stringValue ?? ""

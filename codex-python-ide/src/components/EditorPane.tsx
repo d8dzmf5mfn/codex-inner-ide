@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import Editor, { type OnMount } from "@monaco-editor/react";
 import { Check, LoaderCircle, RotateCcw, Sparkles, X } from "lucide-react";
 import { digestText, previewLines } from "../core/edits";
+import { COMPLETION_TAB_PRECONDITION } from "../core/completions";
 import { languageForPath, supportsCodexEdit } from "../core/languages";
 import type {
   Diagnostic,
@@ -200,6 +201,27 @@ export function EditorPane({
       editor.onDidScrollChange(saveView);
       editor.onDidChangeCursorPosition(saveView);
     }
+    let completionTimer: number | null = null;
+    editor.onDidChangeModelContent((event) => {
+      if (event.isFlush || event.changes.some((change) => change.text.length > 1)) return;
+      if (completionTimer !== null) window.clearTimeout(completionTimer);
+      completionTimer = window.setTimeout(() => {
+        const model = editor.getModel();
+        const position = editor.getPosition();
+        if (!model || !position || model.getWordUntilPosition(position).word.length < 2) return;
+        editor.trigger("keyboard", "editor.action.triggerSuggest", {});
+      }, 60);
+    });
+    editor.onDidDispose(() => {
+      if (completionTimer !== null) window.clearTimeout(completionTimer);
+    });
+    editor.addAction({
+      id: "codex-inner-ide.accept-completion",
+      label: "Accept completion suggestion",
+      keybindings: [monaco.KeyCode.Tab],
+      precondition: COMPLETION_TAB_PRECONDITION,
+      run: () => editor.trigger("keyboard", "acceptSelectedSuggestion", {})
+    });
     editor.addAction({
       id: "codex-inner-edit.accept",
       label: "Accept Codex edit proposal",
@@ -341,6 +363,11 @@ export function EditorPane({
               scrollBeyondLastLine: false,
               renderLineHighlight: "gutter",
               overviewRulerBorder: false,
+              quickSuggestions: { comments: false, strings: true, other: true },
+              suggestOnTriggerCharacters: true,
+              suggestFontSize: 12,
+              suggestLineHeight: 22,
+              tabCompletion: "on",
               wordWrap: "off",
               readOnly: activeDocument.readonly
             }}

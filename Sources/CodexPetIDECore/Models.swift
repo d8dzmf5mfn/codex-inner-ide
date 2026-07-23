@@ -467,6 +467,47 @@ public struct PreviewDescriptor: Codable, Equatable, Sendable {
     }
 }
 
+public enum ThemeMode: String, Codable, Equatable, Sendable {
+    case auto
+    case light
+    case dark
+}
+
+public struct UserCompletionSnippet: Codable, Equatable, Sendable {
+    public let id: String
+    public let languageId: String
+    public let triggerPrefix: String
+    public let displayName: String
+    public let description: String
+    public let body: String
+
+    public init(
+        id: String,
+        languageId: String,
+        triggerPrefix: String,
+        displayName: String,
+        description: String,
+        body: String
+    ) {
+        self.id = id
+        self.languageId = languageId
+        self.triggerPrefix = triggerPrefix
+        self.displayName = displayName
+        self.description = description
+        self.body = body
+    }
+}
+
+public struct GlobalPreferences: Codable, Equatable, Sendable {
+    public let themeMode: ThemeMode
+    public let completionSnippets: [UserCompletionSnippet]
+
+    public init(themeMode: ThemeMode = .auto, completionSnippets: [UserCompletionSnippet] = []) {
+        self.themeMode = themeMode
+        self.completionSnippets = completionSnippets
+    }
+}
+
 public struct IdeWindowState: Codable, Equatable, Sendable {
     public let openPaths: [String]
     public let activePath: String?
