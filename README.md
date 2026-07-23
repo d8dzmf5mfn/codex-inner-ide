@@ -44,8 +44,8 @@ macOS 本地扩展：在 Codex `Files` 下方注入 `IDE` 入口，并优先在 
 输出：
 
 - 安装并启动：`~/Applications/Codex Inner IDE.app`
-- 分发包：`dist/Codex Inner IDE-v0.4.0-preview-macos-arm64.zip`
-- 校验文件：`dist/Codex Inner IDE-v0.4.0-preview-macos-arm64.zip.sha256`
+- 分发包：`dist/Codex.Inner.IDE-v0.4.0-preview-macos-arm64.zip`
+- 校验文件：`dist/Codex.Inner.IDE-v0.4.0-preview-macos-arm64.zip.sha256`
 - 插件包：`dist/codex-inner-edit-v0.1.0.zip`
 
 只生成分发包、不替换当前安装：

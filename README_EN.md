@@ -44,8 +44,8 @@ Requirements:
 Outputs:
 
 - Installed and launched app: `~/Applications/Codex Inner IDE.app`
-- Distribution archive: `dist/Codex Inner IDE-v0.4.0-preview-macos-arm64.zip`
-- Checksum file: `dist/Codex Inner IDE-v0.4.0-preview-macos-arm64.zip.sha256`
+- Distribution archive: `dist/Codex.Inner.IDE-v0.4.0-preview-macos-arm64.zip`
+- Checksum file: `dist/Codex.Inner.IDE-v0.4.0-preview-macos-arm64.zip.sha256`
 - Plugin archive: `dist/codex-inner-edit-v0.1.0.zip`
 
 Build the distribution archive without replacing the current installation:
