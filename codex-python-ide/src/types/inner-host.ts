@@ -188,6 +188,7 @@ export type IdeWindowState = {
   expandedDirectories: string[];
   documentViews?: Record<string, DocumentViewState>;
   pinned?: boolean;
+  sidebarCollapsed?: boolean;
 };
 
 export type RecentWorkspace = {

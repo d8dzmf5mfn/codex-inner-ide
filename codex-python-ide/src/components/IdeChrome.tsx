@@ -1,8 +1,11 @@
 import { type FormEvent } from "react";
 import {
   Braces,
+  CircleCheck,
   Code2,
-  Moon,
+  Eye,
+  PanelLeftClose,
+  PanelLeftOpen,
   Pin,
   PinOff,
   Play,
@@ -10,26 +13,28 @@ import {
   Save,
   Sparkles,
   Square,
-  Sun,
   TriangleAlert,
   X
 } from "lucide-react";
-import type { FileSnapshot, PythonEditScope, RuntimeDescriptor, WorkspaceBinding } from "../types/inner-host";
+import type { FileSnapshot, PythonEditScope, RuntimeDescriptor, ThemeMode, WorkspaceBinding } from "../types/inner-host";
 import type { OpenDocument } from "../core/documents";
 import { languageForPath, runtimeActionForPath, supportsCodexEdit } from "../core/languages";
 
 type IdeTitleBarProps = {
   workspace: WorkspaceBinding;
-  theme: "light" | "dark";
+  themeMode: ThemeMode;
   runtimes: RuntimeDescriptor[];
   selectedRuntimeId: string;
   activeDocument: OpenDocument | null;
   running: boolean;
   pinned: boolean;
+  sidebarCollapsed: boolean;
   onSelectRuntime: (id: string) => void;
   onCreateVenv: () => void;
   onSave: () => void;
   onManageSnippets: () => void;
+  onThemeModeChange: (mode: ThemeMode) => void;
+  onToggleSidebar: () => void;
   onEditCurrentFile: () => void;
   onRun: () => void;
   onTogglePin: () => void;
@@ -38,16 +43,19 @@ type IdeTitleBarProps = {
 
 export function IdeTitleBar({
   workspace,
-  theme,
+  themeMode,
   runtimes,
   selectedRuntimeId,
   activeDocument,
   running,
   pinned,
+  sidebarCollapsed,
   onSelectRuntime,
   onCreateVenv,
   onSave,
   onManageSnippets,
+  onThemeModeChange,
+  onToggleSidebar,
   onEditCurrentFile,
   onRun,
   onTogglePin,
@@ -61,18 +69,37 @@ export function IdeTitleBar({
   const actionLabel = runtimeAction === "preview"
     ? `Preview ${language.label}`
     : runtimeAction === "validate" ? `Validate ${language.label}` : `Run ${language.label}`;
+  const runLabel = running ? `Stop ${language.label}` : actionLabel;
+  const RunIcon = running
+    ? Square
+    : runtimeAction === "preview" ? Eye : runtimeAction === "validate" ? CircleCheck : Play;
   return (
     <header className="titlebar">
       <div className="titlebar-project">
+        <button
+          className="titlebar-sidebar-toggle"
+          type="button"
+          aria-label={sidebarCollapsed ? "Show sidebar" : "Hide sidebar"}
+          title={`${sidebarCollapsed ? "Show" : "Hide"} sidebar (⌘B)`}
+          onClick={onToggleSidebar}
+        >
+          {sidebarCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
+        </button>
         <Code2 size={17} strokeWidth={1.6} aria-hidden="true" />
         <span>{workspace.name}</span>
         <span className="root-label">{workspace.rootLabel}</span>
       </div>
       <div className="titlebar-actions">
-        <span className="time-theme-label" title="Theme follows local time: light 07:00–18:59, dark 19:00–06:59">
-          {theme === "light" ? <Sun size={14} /> : <Moon size={14} />}
-          Auto
-        </span>
+        <select
+          className="theme-select"
+          aria-label="Theme"
+          value={themeMode}
+          onChange={(event) => onThemeModeChange(event.target.value as ThemeMode)}
+        >
+          <option value="auto">Auto</option>
+          <option value="light">Light</option>
+          <option value="dark">Dark</option>
+        </select>
         {runtimes.length > 0 ? (
           <select aria-label={`${language.label} runtime`} value={selectedRuntimeId || runtimes[0]?.id} onChange={(event) => onSelectRuntime(event.target.value)}>
             {runtimes.map((runtime) => (
@@ -85,24 +112,28 @@ export function IdeTitleBar({
           <button type="button" onClick={onCreateVenv}>Create .venv</button>
         ) : <span className="runtime-unavailable">No runtime</span>}
         <button type="button" onClick={onManageSnippets} title="Manage completion snippets">
-          <Braces size={15} strokeWidth={1.7} aria-hidden="true" /> Snippets
+          <Braces size={15} strokeWidth={1.7} aria-hidden="true" /> <span className="button-label">Snippets</span>
         </button>
         <button type="button" onClick={onSave} disabled={!activeDocument?.dirty}>
-          <Save size={15} strokeWidth={1.7} aria-hidden="true" /> Save
+          <Save size={15} strokeWidth={1.7} aria-hidden="true" /> <span className="button-label">Save</span>
         </button>
         <button type="button" onClick={onEditCurrentFile} disabled={!activeCodexEdit || activeDocument?.readonly}>
-          <Sparkles size={15} strokeWidth={1.7} aria-hidden="true" /> Edit current file
+          <Sparkles size={15} strokeWidth={1.7} aria-hidden="true" /> <span className="button-label">Edit current file</span>
         </button>
         <button
           className="run-button"
           type="button"
+          aria-label={runLabel}
+          title={selectedRuntime?.available === false ? selectedRuntime.unavailableReason ?? runLabel : runLabel}
           onClick={onRun}
           disabled={!running && (!activeDocument || runtimeAction === null || !selectedRuntime?.available)}
         >
-          {running
-            ? <Square size={13} strokeWidth={1.8} fill="currentColor" aria-hidden="true" />
-            : <Play size={15} strokeWidth={1.8} fill="currentColor" aria-hidden="true" />}
-          {running ? "Stop" : actionLabel}
+          <RunIcon
+            size={running ? 13 : 16}
+            strokeWidth={1.8}
+            fill={running || runtimeAction === "run" ? "currentColor" : "none"}
+            aria-hidden="true"
+          />
         </button>
         <button
           type="button"

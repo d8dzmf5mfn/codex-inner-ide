@@ -40,6 +40,7 @@ def test_count_words(tmp_path: Path) -> None:
     sample.write_text("one two three", encoding="utf-8")
     assert count_words(sample) == 3
 `,
+  "tests/fixtures/sample.py": "SAMPLE_TEXT = \"one two three\"\n",
   "README.md": "# Python example\n\nOpened by the Codex Inner IDE development host.\n",
   "Main.java": "public class Main { public static void main(String[] args) { System.out.println(\"Hello Java\"); } }\n",
   "app.js": "console.log(\"Hello JavaScript\");\n",
@@ -96,7 +97,7 @@ function handoff(): HandoffResult {
 
 export function createMockInnerHost(): CodexInnerIdeHostV1 {
   const files = new Map(Object.entries(initialFiles));
-  const directories = new Set<string>(["tests"]);
+  const directories = new Set<string>(["tests", "tests/fixtures"]);
   const fileListeners = new Set<(change: FileChange) => void>();
   const pythonListeners = new Set<(event: PythonExecutionEvent) => void>();
   const runtimeListeners = new Set<(event: RuntimeExecutionEvent) => void>();

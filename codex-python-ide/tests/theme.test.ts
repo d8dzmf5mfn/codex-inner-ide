@@ -1,15 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { themeForHour } from "../src/core/theme";
+import { resolveTheme } from "../src/core/theme";
 
-describe("time-adaptive theme", () => {
-  it("uses light colors from 07:00 through 18:59", () => {
-    expect(themeForHour(7)).toBe("light");
-    expect(themeForHour(18)).toBe("light");
+describe("theme mode", () => {
+  it("follows the macOS appearance in automatic mode", () => {
+    expect(resolveTheme("auto", false)).toBe("light");
+    expect(resolveTheme("auto", true)).toBe("dark");
   });
 
-  it("uses dark colors overnight", () => {
-    expect(themeForHour(19)).toBe("dark");
-    expect(themeForHour(0)).toBe("dark");
-    expect(themeForHour(6)).toBe("dark");
+  it("keeps explicit light and dark modes fixed", () => {
+    expect(resolveTheme("light", true)).toBe("light");
+    expect(resolveTheme("dark", false)).toBe("dark");
   });
 });

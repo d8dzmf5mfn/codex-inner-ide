@@ -78,9 +78,10 @@ describe("development Inner IDE host", () => {
       activePath: "main.py",
       bottomPanelOpen: true,
       expandedDirectories: [],
-      pinned: true
+      pinned: true,
+      sidebarCollapsed: true
     });
-    await expect(host.window.loadState()).resolves.toMatchObject({ pinned: true });
+    await expect(host.window.loadState()).resolves.toMatchObject({ pinned: true, sidebarCollapsed: true });
   });
 
   it("switches only through authorized recent workspace ids", async () => {
@@ -100,7 +101,8 @@ describe("development Inner IDE host", () => {
       openPaths: ["main.py"],
       activePath: "main.py",
       bottomPanelOpen: true,
-      expandedDirectories: ["tests"]
+      expandedDirectories: ["tests"],
+      sidebarCollapsed: true
     });
     await host.workspace.openRecent("mock-secondary");
     await expect(host.window.loadState()).resolves.toBeNull();
@@ -108,19 +110,21 @@ describe("development Inner IDE host", () => {
       openPaths: ["index.html"],
       activePath: "index.html",
       bottomPanelOpen: false,
-      expandedDirectories: []
+      expandedDirectories: [],
+      sidebarCollapsed: false
     });
     await host.workspace.openRecent("mock-workspace");
     await expect(host.window.loadState()).resolves.toMatchObject({
       activePath: "main.py",
-      expandedDirectories: ["tests"]
+      expandedDirectories: ["tests"],
+      sidebarCollapsed: true
     });
   });
 
   it("persists global completion snippets through the preferences contract", async () => {
     const host = createMockInnerHost();
     await host.preferences.save({
-      themeMode: "auto",
+      themeMode: "dark",
       completionSnippets: [{
         id: "print-debug",
         languageId: "python",
@@ -131,6 +135,7 @@ describe("development Inner IDE host", () => {
       }]
     });
     await expect(host.preferences.load()).resolves.toMatchObject({
+      themeMode: "dark",
       completionSnippets: [{ triggerPrefix: "pr", languageId: "python" }]
     });
   });

@@ -1,9 +1,9 @@
-export type TimeTheme = "light" | "dark";
+import type { ThemeMode } from "../types/inner-host";
 
-export function themeForHour(hour: number): TimeTheme {
-  return hour >= 7 && hour < 19 ? "light" : "dark";
-}
+export type ResolvedTheme = "light" | "dark";
 
-export function currentTimeTheme(): TimeTheme {
-  return themeForHour(new Date().getHours());
+export function resolveTheme(mode: ThemeMode, systemDark: boolean): ResolvedTheme {
+  if (mode === "dark") return "dark";
+  if (mode === "light") return "light";
+  return systemDark ? "dark" : "light";
 }

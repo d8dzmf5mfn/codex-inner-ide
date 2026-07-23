@@ -527,17 +527,42 @@ public struct IdeWindowState: Codable, Equatable, Sendable {
     public let activePath: String?
     public let bottomPanelOpen: Bool
     public let expandedDirectories: [String]
+    public let sidebarCollapsed: Bool
 
     public init(
         openPaths: [String],
         activePath: String?,
         bottomPanelOpen: Bool,
-        expandedDirectories: [String] = []
+        expandedDirectories: [String] = [],
+        sidebarCollapsed: Bool = false
     ) {
         self.openPaths = openPaths
         self.activePath = activePath
         self.bottomPanelOpen = bottomPanelOpen
         self.expandedDirectories = expandedDirectories
+        self.sidebarCollapsed = sidebarCollapsed
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case openPaths, activePath, bottomPanelOpen, expandedDirectories, sidebarCollapsed
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        openPaths = try values.decode([String].self, forKey: .openPaths)
+        activePath = try values.decodeIfPresent(String.self, forKey: .activePath)
+        bottomPanelOpen = try values.decode(Bool.self, forKey: .bottomPanelOpen)
+        expandedDirectories = try values.decodeIfPresent([String].self, forKey: .expandedDirectories) ?? []
+        sidebarCollapsed = try values.decodeIfPresent(Bool.self, forKey: .sidebarCollapsed) ?? false
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(openPaths, forKey: .openPaths)
+        try values.encodeIfPresent(activePath, forKey: .activePath)
+        try values.encode(bottomPanelOpen, forKey: .bottomPanelOpen)
+        try values.encode(expandedDirectories, forKey: .expandedDirectories)
+        try values.encode(sidebarCollapsed, forKey: .sidebarCollapsed)
     }
 }
 

@@ -10,7 +10,9 @@ import {
   FolderOpen,
   FolderPlus,
   Pencil,
-  Trash2
+  Search,
+  Trash2,
+  X
 } from "lucide-react";
 import {
   LANGUAGE_DEFINITIONS,
@@ -20,6 +22,7 @@ import {
   resolveNewFileName,
   type LanguageId
 } from "../core/languages";
+import { shouldSkipIndexedDirectory } from "../core/completions";
 import type { FileEntry, FileKind } from "../types/inner-host";
 import type { RecentWorkspace, WorkspaceBinding } from "../types/inner-host";
 import { WorkspaceSwitcher } from "./WorkspaceSwitcher";
@@ -67,11 +70,12 @@ export function FileTree({
 }: FileTreeProps) {
   const [children, setChildren] = useState<Record<string, FileEntry[]>>({ "": rootEntries });
   const [expanded, setExpanded] = useState(() => new Set(initialExpanded));
-  const [rootExpanded, setRootExpanded] = useState(true);
   const [selectedDirectory, setSelectedDirectory] = useState("");
   const [createKind, setCreateKind] = useState<FileKind | null>(null);
   const [createName, setCreateName] = useState("");
   const [createLanguageId, setCreateLanguageId] = useState<LanguageId>("python");
+  const [filter, setFilter] = useState("");
+  const normalizedFilter = filter.trim().toLocaleLowerCase();
 
   useEffect(() => {
     setChildren((current) => ({ ...current, "": rootEntries }));
@@ -82,9 +86,46 @@ export function FileTree({
       .then((loaded) => setChildren((current) => ({ ...current, ...Object.fromEntries(loaded) })));
   }, [revision]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  useEffect(() => {
+    if (!normalizedFilter) return;
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        const queue = rootEntries
+          .filter((entry) => entry.kind === "directory" && !shouldSkipIndexedDirectory(entry.relativePath))
+          .map((entry) => entry.relativePath);
+        const visited = new Set<string>();
+        let scanned = 0;
+        while (!cancelled && queue.length > 0 && scanned < 400) {
+          const batch = queue.splice(0, 8).filter((path) => !visited.has(path));
+          batch.forEach((path) => visited.add(path));
+          const results = await Promise.allSettled(batch.map(async (path) => [path, await onLoadDirectory(path)] as const));
+          const loaded = results
+            .filter((result): result is PromiseFulfilledResult<readonly [string, FileEntry[]]> => result.status === "fulfilled")
+            .map((result) => result.value);
+          if (loaded.length > 0) {
+            setChildren((current) => ({ ...current, ...Object.fromEntries(loaded) }));
+          }
+          for (const [, entries] of loaded) {
+            for (const entry of entries) {
+              if (entry.kind === "directory" && !shouldSkipIndexedDirectory(entry.relativePath)) {
+                queue.push(entry.relativePath);
+              }
+            }
+          }
+          scanned += batch.length;
+        }
+      })();
+    }, 120);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [normalizedFilter, revision]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const flattened = useMemo(
-    () => rootExpanded ? flatten(children, expanded) : [],
-    [children, expanded, rootExpanded]
+    () => normalizedFilter ? filterTreeEntries(children, normalizedFilter) : flatten(children, expanded),
+    [children, expanded, normalizedFilter]
   );
 
   const toggle = async (entry: FileEntry) => {
@@ -145,26 +186,42 @@ export function FileTree({
 
   return (
     <aside className="file-tree" aria-label="Project files">
-      <div className="panel-heading file-tree-heading">
-        <span>Explorer</span>
-        <span className="tree-heading-actions">
-          <button type="button" aria-label="New file" title="New file" onClick={() => beginCreate("file")}>
-            <FilePlus2 size={14} />
-          </button>
-          <button type="button" aria-label="New folder" title="New folder" onClick={() => beginCreate("directory")}>
-            <FolderPlus size={14} />
-          </button>
-        </span>
+      <div className="file-tree-top">
+        <label className="file-filter">
+          <Search size={16} strokeWidth={1.7} aria-hidden="true" />
+          <input
+            type="search"
+            aria-label="Filter files"
+            placeholder="Filter files…"
+            value={filter}
+            onChange={(event) => setFilter(event.target.value)}
+          />
+          {filter && (
+            <button type="button" aria-label="Clear file filter" onClick={() => setFilter("")}>
+              <X size={13} />
+            </button>
+          )}
+        </label>
+        <div className="file-tree-heading">
+          <WorkspaceSwitcher
+            workspace={workspace}
+            recent={recentWorkspaces}
+            busy={workspaceSwitching}
+            onChoose={onChooseWorkspace}
+            onOpenRecent={onOpenRecentWorkspace}
+            onRemoveRecent={onRemoveRecentWorkspace}
+            onRelocateRecent={onRelocateRecentWorkspace}
+          />
+          <span className="tree-heading-actions">
+            <button type="button" aria-label="New file" title="New file" onClick={() => beginCreate("file")}>
+              <FilePlus2 size={15} />
+            </button>
+            <button type="button" aria-label="New folder" title="New folder" onClick={() => beginCreate("directory")}>
+              <FolderPlus size={15} />
+            </button>
+          </span>
+        </div>
       </div>
-      <WorkspaceSwitcher
-        workspace={workspace}
-        recent={recentWorkspaces}
-        busy={workspaceSwitching}
-        onChoose={onChooseWorkspace}
-        onOpenRecent={onOpenRecentWorkspace}
-        onRemoveRecent={onRemoveRecentWorkspace}
-        onRelocateRecent={onRelocateRecentWorkspace}
-      />
       {createKind && (
         <form className="tree-create-form" aria-label={createKind === "file" ? "Create file" : "Create folder"} onSubmit={(event) => void create(event)}>
           <label htmlFor="tree-create-name">{createKind === "file" ? "File name" : "Folder name"}</label>
@@ -205,24 +262,10 @@ export function FileTree({
           </div>
         </form>
       )}
-      <button
-        className="tree-root"
-        type="button"
-        aria-expanded={rootExpanded}
-        onClick={() => {
-          setSelectedDirectory("");
-          setRootExpanded((value) => !value);
-        }}
-      >
-        {rootExpanded
-          ? <ChevronDown size={14} strokeWidth={1.7} aria-hidden="true" />
-          : <ChevronRight size={14} strokeWidth={1.7} aria-hidden="true" />}
-        <span>Workspace</span>
-      </button>
       <div className="tree-entries" role="tree">
         {flattened.map(({ entry, depth }) => {
           const isDirectory = entry.kind === "directory";
-          const isExpanded = expanded.has(entry.relativePath);
+          const isExpanded = normalizedFilter ? true : expanded.has(entry.relativePath);
           const isActive = !isDirectory && activePath === entry.relativePath;
           const iconKind = languageForPath(entry.relativePath).iconKind;
           const Icon = isDirectory
@@ -235,13 +278,16 @@ export function FileTree({
               className={`tree-row-wrap${isActive ? " tree-row-active" : ""}`}
               key={`${entry.kind}:${entry.relativePath}`}
               role="treeitem"
+              data-depth={depth}
+              data-language={isDirectory ? undefined : languageForPath(entry.relativePath).id}
               aria-expanded={isDirectory ? isExpanded : undefined}
               aria-selected={isActive}
             >
+              {depth > 0 && <span className="tree-guides" style={{ width: `${depth * 17}px` }} aria-hidden="true" />}
               <button
                 className="tree-row"
                 onClick={() => isDirectory ? void toggle(entry) : onOpenFile(entry.relativePath)}
-                style={{ paddingLeft: `${9 + depth * 15}px` }}
+                style={{ paddingLeft: `${10 + depth * 17}px` }}
                 type="button"
               >
                 {isDirectory
@@ -270,9 +316,32 @@ export function FileTree({
             </div>
           );
         })}
+        {normalizedFilter && flattened.length === 0 && (
+          <div className="tree-empty">No matching files</div>
+        )}
       </div>
     </aside>
   );
+}
+
+export function filterTreeEntries(children: Record<string, FileEntry[]>, query: string) {
+  const normalizedQuery = query.toLocaleLowerCase();
+  const visit = (directory: string, depth: number): Array<{ entry: FileEntry; depth: number }> => {
+    const result: Array<{ entry: FileEntry; depth: number }> = [];
+    for (const entry of children[directory] ?? []) {
+      const matches = entry.name.toLocaleLowerCase().includes(normalizedQuery);
+      if (entry.kind === "directory") {
+        const descendants = visit(entry.relativePath, depth + 1);
+        if (matches || descendants.length > 0) {
+          result.push({ entry, depth }, ...descendants);
+        }
+      } else if (matches) {
+        result.push({ entry, depth });
+      }
+    }
+    return result;
+  };
+  return visit("", 0);
 }
 
 function flatten(children: Record<string, FileEntry[]>, expanded: Set<string>) {

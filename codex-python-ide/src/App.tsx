@@ -29,7 +29,7 @@ import {
   supportsCodexEdit
 } from "./core/languages";
 import { useRuntimeExecution } from "./hooks/useRuntimeExecution";
-import { useTimeTheme } from "./hooks/useTimeTheme";
+import { useTheme } from "./hooks/useTheme";
 import type {
   ActivePythonEditContext,
   CodexInnerIdeHostV1,
@@ -46,6 +46,7 @@ import type {
   RecentWorkspace,
   RuntimeDescriptor,
   SelectionRange,
+  ThemeMode,
   WorkspaceBinding
 } from "./types/inner-host";
 
@@ -66,6 +67,7 @@ type WorkspaceSession = {
   expandedDirectories: string[];
   documentViews: Record<string, DocumentViewState>;
   pinned: boolean;
+  sidebarCollapsed: boolean;
 };
 
 export function App() {
@@ -106,13 +108,14 @@ function InnerIde({ host }: { host: CodexInnerIdeHostV1 }) {
   const [proposal, setProposal] = useState<PythonEditProposal | null>(null);
   const [proposalMessage, setProposalMessage] = useState<string | null>(null);
   const [pinned, setPinned] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [globalPreferences, setGlobalPreferences] = useState<GlobalPreferences>({
     themeMode: "auto",
     completionSnippets: []
   });
   const [snippetsOpen, setSnippetsOpen] = useState(false);
   const documentsRef = useRef(documents);
-  const timeTheme = useTimeTheme();
+  const theme = useTheme(globalPreferences.themeMode);
   const {
     running,
     exitCode,
@@ -132,6 +135,7 @@ function InnerIde({ host }: { host: CodexInnerIdeHostV1 }) {
     setExpandedDirectories(session.expandedDirectories);
     setDocumentViews(session.documentViews);
     setPinned(session.pinned);
+    setSidebarCollapsed(session.sidebarCollapsed);
     setRuntimes({});
     setSelectedRuntimeIds({});
     setPreview(null);
@@ -182,6 +186,15 @@ function InnerIde({ host }: { host: CodexInnerIdeHostV1 }) {
     return () => { cancelled = true; };
   }, [host]);
 
+  const updateThemeMode = useCallback(async (themeMode: ThemeMode) => {
+    try {
+      const saved = await host.preferences.save({ ...globalPreferences, themeMode });
+      setGlobalPreferences(saved);
+    } catch (reason) {
+      setError(message(reason, "Unable to save the theme preference"));
+    }
+  }, [globalPreferences, host]);
+
   useEffect(() => {
     if (!loaded) return;
     void indexWorkspace(host, loaded.workspace.id).catch((reason: unknown) => {
@@ -197,9 +210,10 @@ function InnerIde({ host }: { host: CodexInnerIdeHostV1 }) {
       bottomPanelOpen,
       expandedDirectories,
       documentViews,
-      pinned
+      pinned,
+      sidebarCollapsed
     });
-  }, [activePath, bottomPanelOpen, documentViews, documents, expandedDirectories, host, loaded, pinned]);
+  }, [activePath, bottomPanelOpen, documentViews, documents, expandedDirectories, host, loaded, pinned, sidebarCollapsed]);
 
   useEffect(() => {
     if (!loaded) return;
@@ -420,7 +434,10 @@ function InnerIde({ host }: { host: CodexInnerIdeHostV1 }) {
 
   useEffect(() => {
     const listener = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "b") {
+        event.preventDefault();
+        setSidebarCollapsed((value) => !value);
+      } else if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
         event.preventDefault();
         if (event.shiftKey) void saveAll();
         else if (activePath) void savePath(activePath);
@@ -577,12 +594,13 @@ function InnerIde({ host }: { host: CodexInnerIdeHostV1 }) {
     <main className="ide-shell">
       <IdeTitleBar
         workspace={loaded.workspace}
-        theme={timeTheme}
+        themeMode={globalPreferences.themeMode}
         runtimes={activeRuntimes}
         selectedRuntimeId={selectedRuntimeId}
         activeDocument={activeDocument}
         running={running}
         pinned={pinned}
+        sidebarCollapsed={sidebarCollapsed}
         onSelectRuntime={(id) => setSelectedRuntimeIds((current) => ({
           ...current,
           [activeLanguage.id]: id
@@ -603,6 +621,8 @@ function InnerIde({ host }: { host: CodexInnerIdeHostV1 }) {
         }).catch((reason) => setError(message(reason, "Unable to create .venv")))}
         onSave={() => { if (activePath) void savePath(activePath); }}
         onManageSnippets={() => setSnippetsOpen(true)}
+        onThemeModeChange={(mode) => void updateThemeMode(mode)}
+        onToggleSidebar={() => setSidebarCollapsed((value) => !value)}
         onEditCurrentFile={() => openEditComposer("file")}
         onRun={() => void runActiveFile()}
         onTogglePin={() => {
@@ -637,15 +657,15 @@ function InnerIde({ host }: { host: CodexInnerIdeHostV1 }) {
         onDismiss={() => { setError(null); setNotice(null); }}
       />
 
-      <div className="workspace-grid">
-        <FileTree
+      <div className={`workspace-grid${sidebarCollapsed ? " workspace-grid-sidebar-collapsed" : ""}`}>
+        {!sidebarCollapsed && <FileTree
           key={loaded.workspace.id}
           workspace={loaded.workspace}
           recentWorkspaces={recentWorkspaces}
           workspaceSwitching={workspaceSwitching}
           rootEntries={loaded.rootEntries}
           activePath={activePath}
-          initialExpanded={loaded.savedExpanded}
+          initialExpanded={expandedDirectories}
           revision={treeRevision}
           onExpandedChange={setExpandedDirectories}
           onLoadDirectory={(path) => host.files.list(path)}
@@ -674,7 +694,7 @@ function InnerIde({ host }: { host: CodexInnerIdeHostV1 }) {
           onRemoveRecentWorkspace={removeRecentWorkspace}
           onRelocateRecentWorkspace={(id) => switchWorkspace(() => host.workspace.relocateRecent(id))}
           onError={(reason) => setError(message(reason, "File operation failed"))}
-        />
+        />}
         <div className="editor-stack">
           <div className="editor-main-row">
             <EditorPane
@@ -686,7 +706,7 @@ function InnerIde({ host }: { host: CodexInnerIdeHostV1 }) {
             documentViews={documentViews}
             onViewStateChange={(path, state) => setDocumentViews((views) => ({ ...views, [path]: state }))}
             revealDiagnostic={revealDiagnostic}
-            theme={timeTheme}
+            theme={theme}
             onMoreDetails={(range, text) => void handoffSelection(range, text)}
             onEditSelection={(range, text) => openEditComposer("selection", { range, selectedText: text })}
             onSelectionChange={(selection) => setActiveSelection(selection && activePath
@@ -785,6 +805,7 @@ async function loadWorkspaceSession(
     bottomPanelOpen: savedState?.bottomPanelOpen ?? true,
     expandedDirectories: savedState?.expandedDirectories ?? [],
     documentViews: savedState?.documentViews ?? {},
-    pinned: savedState?.pinned ?? false
+    pinned: savedState?.pinned ?? false,
+    sidebarCollapsed: savedState?.sidebarCollapsed ?? false
   };
 }

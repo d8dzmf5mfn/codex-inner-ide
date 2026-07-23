@@ -303,6 +303,24 @@ final class ProtocolSafetyTests: XCTestCase {
         XCTAssertTrue(script.contains("__codexInnerIdeGetActiveEditContext"))
     }
 
+    func testLegacyWindowStateDefaultsSidebarToVisible() throws {
+        let state = try JSONDecoder().decode(
+            IdeWindowState.self,
+            from: Data(#"{"openPaths":["main.py"],"activePath":"main.py","bottomPanelOpen":true,"expandedDirectories":[]}"#.utf8)
+        )
+        XCTAssertFalse(state.sidebarCollapsed)
+        let collapsed = IdeWindowState(
+            openPaths: ["main.py"],
+            activePath: "main.py",
+            bottomPanelOpen: true,
+            sidebarCollapsed: true
+        )
+        XCTAssertTrue(try JSONDecoder().decode(
+            IdeWindowState.self,
+            from: JSONEncoder().encode(collapsed)
+        ).sidebarCollapsed)
+    }
+
     func testQuickChatHandoffUsesTheDedicatedQuickChatComposerInsteadOfCodexComposer() {
         let script = InjectionScripts.quickChatComposerHandoff(prompt: "test selection")
 
