@@ -21,11 +21,14 @@ final class ControllerCoordinator: IDEWindowControllerDelegate {
     private var watcher: WorkspaceWatcher?
     private var appServerClient: AppServerClient?
     private var pythonService: PythonService?
+    private var runtimeService: RuntimeService?
+    private var previewService: PreviewService?
     private var pythonEditService: PythonEditService?
     private var pythonUnavailableReason: String?
     private var localBridgeServer: LocalBridgeServer?
 
     private var dirty = false
+    private var activeRuntimeRunID: String?
     private var activeTaskKey = ""
     private var boundTaskKey = ""
     private var recentIDEChanges: [String: Date] = [:]
@@ -291,6 +294,7 @@ final class ControllerCoordinator: IDEWindowControllerDelegate {
 
     private func startPythonRuntime(_ workspace: WorkspaceService) async {
         pythonUnavailableReason = nil
+        previewService = PreviewService(workspace: workspace)
         guard let installation else {
             pythonUnavailableReason = "Codex Desktop is unavailable, so Python execution is disabled."
             return
@@ -300,18 +304,24 @@ final class ControllerCoordinator: IDEWindowControllerDelegate {
             workingDirectoryURL: workspace.rootURL
         )
         let python = PythonService(client: client, workspace: workspace)
+        let runtime = RuntimeService(client: client, workspace: workspace)
         let edits = PythonEditService(client: client, workspace: workspace)
         await python.setEventHandler { [weak self] event in
-            Task { await self?.emit(type: "python.event", payload: try? .fromEncodable(event)) }
+            Task { await self?.handlePythonRuntimeEvent(event) }
+        }
+        await runtime.setEventHandler { [weak self] event in
+            Task { await self?.handleRuntimeEvent(event) }
         }
         await edits.setEventHandler { [weak self] event in
             Task { await self?.emit(type: "edits.event", payload: try? .fromEncodable(event)) }
         }
         do {
             try await python.start()
+            await runtime.start()
             await edits.start()
             appServerClient = client
             pythonService = python
+            runtimeService = runtime
             pythonEditService = edits
         } catch {
             pythonUnavailableReason = error.localizedDescription
@@ -324,8 +334,13 @@ final class ControllerCoordinator: IDEWindowControllerDelegate {
         watcher = nil
         if let pythonEditService { await pythonEditService.stop() }
         pythonEditService = nil
+        if let runtimeService { await runtimeService.stop() }
+        runtimeService = nil
         if let pythonService { await pythonService.stop() }
         pythonService = nil
+        previewService?.stop()
+        previewService = nil
+        activeRuntimeRunID = nil
         appServerClient = nil
         pythonUnavailableReason = nil
         recentIDEChanges.removeAll()
@@ -483,12 +498,18 @@ final class ControllerCoordinator: IDEWindowControllerDelegate {
                   let path = request.params["relativePath"]?.stringValue,
                   let interpreter = request.params["interpreterId"]?.stringValue
             else { throw InnerIDEError.bridgeRejected("run parameters are missing") }
-            return .object([
-                "runId": .string(try await pythonService.run(
+            try reserveRuntimeTask()
+            do {
+                let runID = try await pythonService.run(
                     relativePath: path,
                     interpreterID: interpreter
-                ))
-            ])
+                )
+                adoptRuntimeRunID(runID)
+                return .object(["runId": .string(runID)])
+            } catch {
+                clearRuntimeReservation()
+                throw error
+            }
         case "python.checkSyntax":
             guard let pythonService,
                   let path = request.params["relativePath"]?.stringValue,
@@ -504,6 +525,117 @@ final class ControllerCoordinator: IDEWindowControllerDelegate {
             else { throw InnerIDEError.bridgeRejected("run id is missing") }
             try await pythonService.terminate(runID: runID)
             return .object([:])
+        case "runtime.discover":
+            guard let languageID = request.params["languageId"]?.stringValue else {
+                throw InnerIDEError.bridgeRejected("runtime language is missing")
+            }
+            if languageID == "python" {
+                guard let pythonService else {
+                    return try .fromEncodable([RuntimeDescriptor(
+                        id: "python-unavailable",
+                        languageId: "python",
+                        label: "Python unavailable",
+                        version: "Interpreter discovery is unavailable",
+                        source: "missing",
+                        action: .run,
+                        available: false,
+                        unavailableReason: pythonUnavailableReason ?? "Python service is not ready"
+                    )])
+                }
+                let interpreters = await pythonService.discover()
+                return try .fromEncodable(interpreters.map { interpreter in
+                    RuntimeDescriptor(
+                        id: interpreter.id,
+                        languageId: "python",
+                        label: interpreter.version,
+                        version: interpreter.version,
+                        executable: interpreter.executable,
+                        source: interpreter.source,
+                        action: .run
+                    )
+                })
+            }
+            if let runtimeService {
+                return try .fromEncodable(await runtimeService.discover(languageID: languageID))
+            }
+            return try .fromEncodable(Self.builtinRuntimeDescriptors(languageID: languageID))
+        case "runtime.execute":
+            let value = try request.params.decode(RuntimeExecuteRequest.self)
+            try reserveRuntimeTask()
+            if value.languageId == "python" {
+                guard let pythonService, let runtimeID = value.runtimeId else {
+                    clearRuntimeReservation()
+                    throw InnerIDEError.commandFailed(
+                        pythonUnavailableReason ?? "Select an available Python interpreter"
+                    )
+                }
+                do {
+                    let runID = try await pythonService.run(
+                        relativePath: value.relativePath,
+                        interpreterID: runtimeID
+                    )
+                    adoptRuntimeRunID(runID)
+                    return .object(["runId": .string(runID)])
+                } catch {
+                    clearRuntimeReservation()
+                    throw error
+                }
+            }
+            guard let runtimeService else {
+                clearRuntimeReservation()
+                throw InnerIDEError.appServerUnavailable("Language runtime service is not ready")
+            }
+            do {
+                let runID = try await runtimeService.execute(value)
+                adoptRuntimeRunID(runID)
+                return .object(["runId": .string(runID)])
+            } catch {
+                clearRuntimeReservation()
+                throw error
+            }
+        case "runtime.check":
+            let value = try request.params.decode(RuntimeCheckRequest.self)
+            if value.languageId == "python" {
+                guard let pythonService, let runtimeID = value.runtimeId else { return .array([]) }
+                return try .fromEncodable(try await pythonService.checkSyntax(
+                    relativePath: value.relativePath,
+                    interpreterID: runtimeID
+                ))
+            }
+            guard let runtimeService else { return .array([]) }
+            return try .fromEncodable(try await runtimeService.check(value))
+        case "runtime.terminate":
+            guard let runID = request.params["runId"]?.stringValue else {
+                throw InnerIDEError.bridgeRejected("run id is missing")
+            }
+            try? await pythonService?.terminate(runID: runID)
+            try? await runtimeService?.terminate(runID: runID)
+            return .object([:])
+        case "preview.open":
+            guard let previewService,
+                  let relativePath = request.params["relativePath"]?.stringValue,
+                  let languageID = request.params["languageId"]?.stringValue
+            else { throw InnerIDEError.bridgeRejected("preview parameters are missing") }
+            return try .fromEncodable(try await previewService.descriptor(
+                relativePath: relativePath,
+                languageID: languageID,
+                preferredHTMLEntry: request.params["htmlEntryRelativePath"]?.stringValue
+            ))
+        case "preview.openExternal":
+            guard let previewService,
+                  let relativePath = request.params["relativePath"]?.stringValue,
+                  let languageID = request.params["languageId"]?.stringValue
+            else { throw InnerIDEError.bridgeRejected("preview parameters are missing") }
+            let value = try await previewService.descriptor(
+                relativePath: relativePath,
+                languageID: languageID,
+                preferredHTMLEntry: request.params["htmlEntryRelativePath"]?.stringValue
+            )
+            guard let urlText = value.url, let url = URL(string: urlText) else {
+                throw InnerIDEError.commandFailed("This preview cannot open in a browser")
+            }
+            NSWorkspace.shared.open(url)
+            return try .fromEncodable(value)
         case "chatgpt.moreDetails":
             let context = try request.params.decode(IdeSelectionContext.self)
             let prompt = try SelectionPrompt.renderForChatGPT(context)
@@ -692,6 +824,36 @@ final class ControllerCoordinator: IDEWindowControllerDelegate {
         await emit(type: "files.changed", payload: try? .fromEncodable(classified))
     }
 
+    private func reserveRuntimeTask() throws {
+        guard activeRuntimeRunID == nil else {
+            throw InnerIDEError.commandFailed("Another workspace task is already running")
+        }
+        activeRuntimeRunID = "starting"
+    }
+
+    private func adoptRuntimeRunID(_ runID: String) {
+        if activeRuntimeRunID == "starting" { activeRuntimeRunID = runID }
+    }
+
+    private func clearRuntimeReservation() {
+        if activeRuntimeRunID == "starting" { activeRuntimeRunID = nil }
+    }
+
+    private func handlePythonRuntimeEvent(_ event: PythonExecutionEvent) async {
+        await emit(type: "python.event", payload: try? .fromEncodable(event))
+        await handleRuntimeEvent(RuntimeExecutionEvent(python: event))
+    }
+
+    private func handleRuntimeEvent(_ event: RuntimeExecutionEvent) async {
+        if event.kind == "started", activeRuntimeRunID == nil || activeRuntimeRunID == "starting" {
+            activeRuntimeRunID = event.runId
+        } else if ["exited", "failed"].contains(event.kind),
+                  activeRuntimeRunID == event.runId || activeRuntimeRunID == "starting" {
+            activeRuntimeRunID = nil
+        }
+        await emit(type: "runtime.event", payload: try? .fromEncodable(event))
+    }
+
     private func emit(type: String, payload: JSONValue?) async {
         guard let payload else { return }
         ideWindowController?.emit(type: type, payload: payload)
@@ -704,6 +866,49 @@ final class ControllerCoordinator: IDEWindowControllerDelegate {
         alert.addButton(withTitle: "Create .venv")
         alert.addButton(withTitle: "Cancel")
         return alert.runModal() == .alertFirstButtonReturn
+    }
+
+    private static func builtinRuntimeDescriptors(languageID: String) -> [RuntimeDescriptor] {
+        switch languageID {
+        case "html", "css":
+            return [RuntimeDescriptor(
+                id: "builtin-\(languageID)",
+                languageId: languageID,
+                label: languageID == "html" ? "HTML Preview" : "CSS Preview",
+                version: "Built in",
+                source: "builtin",
+                action: .preview
+            )]
+        case "json":
+            return [RuntimeDescriptor(
+                id: "builtin-json",
+                languageId: languageID,
+                label: "JSON Validator",
+                version: "Built in",
+                source: "builtin",
+                action: .validate
+            )]
+        case "markdown":
+            return [RuntimeDescriptor(
+                id: "builtin-markdown",
+                languageId: languageID,
+                label: "Markdown Preview",
+                version: "Built in",
+                source: "builtin",
+                action: .preview
+            )]
+        default:
+            return [RuntimeDescriptor(
+                id: "\(languageID)-unavailable",
+                languageId: languageID,
+                label: "Runtime unavailable",
+                version: "Codex runtime service is not ready",
+                source: "missing",
+                action: .run,
+                available: false,
+                unavailableReason: "Codex Desktop integration is required for command execution"
+            )]
+        }
     }
 
     private func present(_ error: Error) {

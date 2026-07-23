@@ -2,6 +2,7 @@ import { ChevronDown, ChevronUp, CircleCheck, CircleX, Square } from "lucide-rea
 import type { Diagnostic } from "../types/inner-host";
 
 type OutputPanelProps = {
+  languageLabel: string;
   open: boolean;
   running: boolean;
   exitCode: number | null;
@@ -13,6 +14,7 @@ type OutputPanelProps = {
 };
 
 export function OutputPanel({
+  languageLabel,
   open,
   running,
   exitCode,
@@ -23,7 +25,7 @@ export function OutputPanel({
   onOpenDiagnostic
 }: OutputPanelProps) {
   return (
-    <section className={`output-panel${open ? " output-panel-open" : ""}`} aria-label="Python output">
+    <section className={`output-panel${open ? " output-panel-open" : ""}`} aria-label={`${languageLabel} output`}>
       <div className="output-heading">
         <button className="output-toggle" onClick={onToggle} type="button">
           <span>Output</span>
@@ -44,7 +46,7 @@ export function OutputPanel({
       </div>
       {open && (
         <div className="output-content">
-          <pre>{output || "Run the active Python file to see output."}</pre>
+          <pre>{output || `Run, preview, or validate the active ${languageLabel} file to see output.`}</pre>
           <div className="diagnostics" aria-label="Problems">
             {diagnostics.length === 0 ? (
               <div className="no-problems">No problems.</div>

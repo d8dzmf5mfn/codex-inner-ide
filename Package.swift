@@ -16,7 +16,8 @@ let package = Package(
             name: "CodexPetIDECore",
             linkerSettings: [
                 .linkedFramework("AppKit"),
-                .linkedFramework("CoreServices")
+                .linkedFramework("CoreServices"),
+                .linkedFramework("Network")
             ]
         ),
         .executableTarget(

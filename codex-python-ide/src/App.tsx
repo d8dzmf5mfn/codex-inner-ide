@@ -12,14 +12,16 @@ import { EditorPane } from "./components/EditorPane";
 import { FileTree } from "./components/FileTree";
 import { EditRequestBar, IdeTitleBar, StatusNotice } from "./components/IdeChrome";
 import { OutputPanel } from "./components/OutputPanel";
+import { PreviewPane } from "./components/PreviewPane";
 import { digestText } from "./core/edits";
 import {
+  languageForPath,
   preferredInitialFilePath,
+  runtimeActionForPath,
   selectionLanguageForPath,
-  supportsCodexEdit,
-  supportsPythonExecution
+  supportsCodexEdit
 } from "./core/languages";
-import { usePythonExecution } from "./hooks/usePythonExecution";
+import { useRuntimeExecution } from "./hooks/useRuntimeExecution";
 import { useTimeTheme } from "./hooks/useTimeTheme";
 import type {
   ActivePythonEditContext,
@@ -30,9 +32,10 @@ import type {
   FileKind,
   FileSnapshot,
   IdeSelectionContext,
-  PythonInterpreter,
   PythonEditProposal,
   PythonEditScope,
+  PreviewDescriptor,
+  RuntimeDescriptor,
   SelectionRange,
   WorkspaceBinding
 } from "./types/inner-host";
@@ -43,7 +46,6 @@ type EditComposer = { scope: PythonEditScope; instruction: string };
 type LoadedIde = {
   workspace: WorkspaceBinding;
   rootEntries: FileEntry[];
-  interpreters: PythonInterpreter[];
   savedExpanded: string[];
   savedViews: Record<string, DocumentViewState>;
 };
@@ -67,7 +69,9 @@ function InnerIde({ host }: { host: CodexInnerIdeHostV1 }) {
   const [loaded, setLoaded] = useState<LoadedIde | null>(null);
   const [documents, setDocuments] = useState<OpenDocument[]>([]);
   const [activePath, setActivePath] = useState<string | null>(null);
-  const [selectedInterpreterId, setSelectedInterpreterId] = useState("");
+  const [runtimes, setRuntimes] = useState<Record<string, RuntimeDescriptor[]>>({});
+  const [selectedRuntimeIds, setSelectedRuntimeIds] = useState<Record<string, string>>({});
+  const [preview, setPreview] = useState<PreviewDescriptor | null>(null);
   const [bottomPanelOpen, setBottomPanelOpen] = useState(true);
   const [expandedDirectories, setExpandedDirectories] = useState<string[]>([]);
   const [documentViews, setDocumentViews] = useState<Record<string, DocumentViewState>>({});
@@ -89,10 +93,10 @@ function InnerIde({ host }: { host: CodexInnerIdeHostV1 }) {
     exitCode,
     output,
     diagnostics,
-    run: runPython,
-    stop: stopPython,
-    checkSyntax
-  } = usePythonExecution(host);
+    execute,
+    stop,
+    check
+  } = useRuntimeExecution(host);
 
   useEffect(() => {
     documentsRef.current = documents;
@@ -121,7 +125,6 @@ function InnerIde({ host }: { host: CodexInnerIdeHostV1 }) {
       setLoaded({
         workspace,
         rootEntries,
-        interpreters: [],
         savedExpanded: savedState?.expandedDirectories ?? [],
         savedViews: savedState?.documentViews ?? {}
       });
@@ -133,14 +136,6 @@ function InnerIde({ host }: { host: CodexInnerIdeHostV1 }) {
       const restoredPinned = savedState?.pinned ?? false;
       setPinned(restoredPinned);
       host.window.setPinned(restoredPinned);
-
-      void host.python.discover().then((interpreters) => {
-        if (cancelled) return;
-        setLoaded((current) => current ? { ...current, interpreters } : current);
-        setSelectedInterpreterId((current) => current || interpreters[0]?.id || "");
-      }).catch((reason: unknown) => {
-        if (!cancelled) setNotice(message(reason, "Python interpreter discovery is unavailable"));
-      });
     }).catch((reason: unknown) => {
       if (!cancelled) setError(message(reason, "Unable to initialize the IDE"));
     });
@@ -203,6 +198,30 @@ function InnerIde({ host }: { host: CodexInnerIdeHostV1 }) {
   }), [host]);
 
   const activeDocument = documents.find((document) => document.relativePath === activePath) ?? null;
+  const activeLanguage = languageForPath(activeDocument?.relativePath ?? "");
+  const activeRuntimes = runtimes[activeLanguage.id] ?? [];
+  const selectedRuntimeId = selectedRuntimeIds[activeLanguage.id]
+    ?? activeRuntimes.find((runtime) => runtime.available)?.id
+    ?? activeRuntimes[0]?.id
+    ?? "";
+
+  useEffect(() => {
+    if (!activeDocument || runtimeActionForPath(activeDocument.relativePath) === null) return;
+    let cancelled = false;
+    void host.runtime.discover(activeLanguage.id).then((values) => {
+      if (cancelled) return;
+      setRuntimes((current) => ({ ...current, [activeLanguage.id]: values }));
+      setSelectedRuntimeIds((current) => ({
+        ...current,
+        [activeLanguage.id]: values.some((value) => value.id === current[activeLanguage.id])
+          ? current[activeLanguage.id]
+          : values.find((value) => value.available)?.id ?? values[0]?.id ?? ""
+      }));
+    }).catch((reason: unknown) => {
+      if (!cancelled) setNotice(message(reason, `${activeLanguage.label} runtime discovery is unavailable`));
+    });
+    return () => { cancelled = true; };
+  }, [activeDocument?.relativePath, activeLanguage.id, activeLanguage.label, host]);
 
   useEffect(() => {
     setActiveSelection((current) => current?.relativePath === activePath ? current : null);
@@ -284,8 +303,15 @@ function InnerIde({ host }: { host: CodexInnerIdeHostV1 }) {
       ));
       setConflict(null);
       setNotice(`Saved ${relativePath}`);
-      if (supportsPythonExecution(relativePath) && selectedInterpreterId) {
-        await checkSyntax(relativePath, selectedInterpreterId);
+      const language = languageForPath(relativePath);
+      const action = runtimeActionForPath(relativePath);
+      const runtimeId = selectedRuntimeIds[language.id];
+      if (runtimeId && action !== null && action !== "preview") {
+        try {
+          await check({ relativePath, languageId: language.id, runtimeId });
+        } catch (reason) {
+          setNotice(message(reason, `Saved ${relativePath}; validation is unavailable`));
+        }
       }
       return true;
     } catch (reason) {
@@ -296,7 +322,7 @@ function InnerIde({ host }: { host: CodexInnerIdeHostV1 }) {
       setError(message(reason, `Unable to save ${relativePath}`));
       return false;
     }
-  }, [checkSyntax, host, selectedInterpreterId]);
+  }, [check, host, selectedRuntimeIds]);
 
   const saveAll = useCallback(async () => {
     for (const document of documentsRef.current.filter((item) => item.dirty)) {
@@ -323,11 +349,36 @@ function InnerIde({ host }: { host: CodexInnerIdeHostV1 }) {
   }, [activePath, saveAll, savePath]);
 
   const runActiveFile = async () => {
-    if (!activeDocument || !supportsPythonExecution(activeDocument.relativePath) || !selectedInterpreterId) return;
+    if (running) {
+      stop();
+      return;
+    }
+    if (!activeDocument) return;
+    const language = languageForPath(activeDocument.relativePath);
+    const action = runtimeActionForPath(activeDocument.relativePath);
+    if (!action) return;
     if (!await savePath(activeDocument.relativePath)) return;
-    setBottomPanelOpen(true);
     setError(null);
-    await runPython(activeDocument.relativePath, selectedInterpreterId);
+    if (action === "preview") {
+      try {
+        const value = await host.preview.open({
+          relativePath: activeDocument.relativePath,
+          languageId: language.id,
+          runtimeId: selectedRuntimeId || null,
+          htmlEntryRelativePath: preview?.entryRelativePath ?? null
+        });
+        setPreview(value);
+      } catch (reason) {
+        setError(message(reason, `Unable to preview ${activeDocument.relativePath}`));
+      }
+      return;
+    }
+    setBottomPanelOpen(true);
+    await execute({
+      relativePath: activeDocument.relativePath,
+      languageId: language.id,
+      runtimeId: selectedRuntimeId || null
+    });
   };
 
   const handoffSelection = async (range: SelectionRange, selectedText: string) => {
@@ -445,15 +496,28 @@ function InnerIde({ host }: { host: CodexInnerIdeHostV1 }) {
       <IdeTitleBar
         workspace={loaded.workspace}
         theme={timeTheme}
-        interpreters={loaded.interpreters}
-        selectedInterpreterId={selectedInterpreterId}
+        runtimes={activeRuntimes}
+        selectedRuntimeId={selectedRuntimeId}
         activeDocument={activeDocument}
         running={running}
         pinned={pinned}
-        onSelectInterpreter={setSelectedInterpreterId}
+        onSelectRuntime={(id) => setSelectedRuntimeIds((current) => ({
+          ...current,
+          [activeLanguage.id]: id
+        }))}
         onCreateVenv={() => void host.python.createVenv().then((interpreter) => {
-          setLoaded((current) => current ? { ...current, interpreters: [interpreter] } : current);
-          setSelectedInterpreterId(interpreter.id);
+          const runtime: RuntimeDescriptor = {
+            id: interpreter.id,
+            languageId: "python",
+            label: interpreter.version,
+            version: interpreter.version,
+            executable: interpreter.executable,
+            source: interpreter.source,
+            action: "run",
+            available: true
+          };
+          setRuntimes((current) => ({ ...current, python: [runtime] }));
+          setSelectedRuntimeIds((current) => ({ ...current, python: runtime.id }));
         }).catch((reason) => setError(message(reason, "Unable to create .venv")))}
         onSave={() => { if (activePath) void savePath(activePath); }}
         onEditCurrentFile={() => openEditComposer("file")}
@@ -519,7 +583,8 @@ function InnerIde({ host }: { host: CodexInnerIdeHostV1 }) {
           onError={(reason) => setError(message(reason, "File operation failed"))}
         />
         <div className="editor-stack">
-          <EditorPane
+          <div className="editor-main-row">
+            <EditorPane
             documents={documents}
             activePath={activePath}
             onActivate={setActivePath}
@@ -547,15 +612,28 @@ function InnerIde({ host }: { host: CodexInnerIdeHostV1 }) {
               setProposal(null);
               setEditComposer(lastEditRequest);
             }}
-          />
+            />
+            {preview && (
+              <PreviewPane
+                preview={preview}
+                onClose={() => setPreview(null)}
+                onOpenExternal={() => void host.preview.openExternal({
+                  relativePath: preview.relativePath,
+                  languageId: preview.languageId,
+                  htmlEntryRelativePath: preview.entryRelativePath ?? null
+                }).catch((reason) => setError(message(reason, "Unable to open preview in the default browser")))}
+              />
+            )}
+          </div>
           <OutputPanel
+            languageLabel={activeLanguage.label}
             open={bottomPanelOpen}
             running={running}
             exitCode={exitCode}
             output={output}
             diagnostics={diagnostics}
             onToggle={() => setBottomPanelOpen((open) => !open)}
-            onStop={stopPython}
+            onStop={stop}
             onOpenDiagnostic={(diagnostic) => {
               void openFile(diagnostic.relativePath).then(() => setRevealDiagnostic({ ...diagnostic }));
             }}

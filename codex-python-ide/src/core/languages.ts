@@ -11,7 +11,7 @@ export type LanguageId =
 
 export type SelectionLanguageId = Exclude<LanguageId, "plaintext"> | "text";
 export type LanguageIconKind = "code" | "markup" | "data" | "text";
-export type LanguageExecution = "python" | null;
+export type LanguageExecution = "run" | "preview" | "validate" | null;
 export type LanguageEditProvider = "python" | null;
 
 export type LanguageDefinition = Readonly<{
@@ -26,14 +26,14 @@ export type LanguageDefinition = Readonly<{
 }>;
 
 export const LANGUAGE_DEFINITIONS = [
-  language("python", "Python", "python", [".py"], ".py", "code", "python", "python"),
-  language("java", "Java", "java", [".java"], ".java", "code"),
-  language("html", "HTML", "html", [".html", ".htm"], ".html", "markup"),
-  language("typescript", "TypeScript", "typescript", [".ts", ".tsx", ".mts", ".cts"], ".ts", "code"),
-  language("javascript", "JavaScript", "javascript", [".js", ".jsx", ".mjs", ".cjs"], ".js", "code"),
-  language("css", "CSS", "css", [".css"], ".css", "code"),
-  language("json", "JSON", "json", [".json", ".jsonc"], ".json", "data"),
-  language("markdown", "Markdown", "markdown", [".md", ".markdown"], ".md", "text"),
+  language("python", "Python", "python", [".py"], ".py", "code", "run", "python"),
+  language("java", "Java", "java", [".java"], ".java", "code", "run"),
+  language("html", "HTML", "html", [".html", ".htm"], ".html", "markup", "preview"),
+  language("typescript", "TypeScript", "typescript", [".ts", ".tsx", ".mts", ".cts"], ".ts", "code", "run"),
+  language("javascript", "JavaScript", "javascript", [".js", ".jsx", ".mjs", ".cjs"], ".js", "code", "run"),
+  language("css", "CSS", "css", [".css"], ".css", "code", "preview"),
+  language("json", "JSON", "json", [".json", ".jsonc"], ".json", "data", "validate"),
+  language("markdown", "Markdown", "markdown", [".md", ".markdown"], ".md", "text", "preview"),
   language("plaintext", "Plain Text", "plaintext", [".txt", ".log"], ".txt", "text")
 ] as const satisfies readonly LanguageDefinition[];
 
@@ -79,7 +79,11 @@ export function resolveNewFileName(
 }
 
 export function supportsPythonExecution(relativePath: string): boolean {
-  return relativePath.endsWith(".py") && languageForPath(relativePath).execution === "python";
+  return relativePath.endsWith(".py") && languageForPath(relativePath).id === "python";
+}
+
+export function runtimeActionForPath(relativePath: string): LanguageExecution {
+  return languageForPath(relativePath).execution;
 }
 
 export function supportsCodexEdit(relativePath: string): boolean {

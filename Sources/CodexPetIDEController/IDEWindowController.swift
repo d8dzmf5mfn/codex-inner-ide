@@ -184,6 +184,13 @@ final class IDEWindowController: NSWindowController, NSWindowDelegate, WKNavigat
         decidePolicyFor navigationAction: WKNavigationAction,
         decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
     ) {
+        if navigationAction.targetFrame?.isMainFrame == false {
+            let url = navigationAction.request.url
+            let isLoopbackPreview = url?.scheme == "http" && url?.host == "127.0.0.1"
+            let isEmbeddedPreview = ["about", "blob", "data"].contains(url?.scheme ?? "")
+            decisionHandler(isLoopbackPreview || isEmbeddedPreview ? .allow : .cancel)
+            return
+        }
         let isInitialDocument = navigationAction.navigationType == .other
             && (navigationAction.request.url == nil || navigationAction.request.url?.scheme == "about")
         decisionHandler(isInitialDocument ? .allow : .cancel)
@@ -298,7 +305,7 @@ final class IDEWindowController: NSWindowController, NSWindowDelegate, WKNavigat
         <head>
           <meta charset="utf-8">
           <meta name="viewport" content="width=device-width,initial-scale=1">
-          <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'nonce-\(nonce)' blob:; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; worker-src blob:; child-src blob:; connect-src 'none'; base-uri 'none'; form-action 'none'">
+          <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'nonce-\(nonce)' blob:; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; worker-src blob:; child-src blob:; frame-src http://127.0.0.1:* blob: data:; connect-src 'none'; base-uri 'none'; form-action 'none'">
           <title>Codex Inner IDE</title>
           <style>\(style)</style>
         </head>

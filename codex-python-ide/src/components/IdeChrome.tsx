@@ -8,23 +8,24 @@ import {
   RotateCcw,
   Save,
   Sparkles,
+  Square,
   Sun,
   TriangleAlert,
   X
 } from "lucide-react";
-import type { FileSnapshot, PythonEditScope, PythonInterpreter, WorkspaceBinding } from "../types/inner-host";
+import type { FileSnapshot, PythonEditScope, RuntimeDescriptor, WorkspaceBinding } from "../types/inner-host";
 import type { OpenDocument } from "../core/documents";
-import { supportsCodexEdit, supportsPythonExecution } from "../core/languages";
+import { languageForPath, runtimeActionForPath, supportsCodexEdit } from "../core/languages";
 
 type IdeTitleBarProps = {
   workspace: WorkspaceBinding;
   theme: "light" | "dark";
-  interpreters: PythonInterpreter[];
-  selectedInterpreterId: string;
+  runtimes: RuntimeDescriptor[];
+  selectedRuntimeId: string;
   activeDocument: OpenDocument | null;
   running: boolean;
   pinned: boolean;
-  onSelectInterpreter: (id: string) => void;
+  onSelectRuntime: (id: string) => void;
   onCreateVenv: () => void;
   onSave: () => void;
   onEditCurrentFile: () => void;
@@ -36,12 +37,12 @@ type IdeTitleBarProps = {
 export function IdeTitleBar({
   workspace,
   theme,
-  interpreters,
-  selectedInterpreterId,
+  runtimes,
+  selectedRuntimeId,
   activeDocument,
   running,
   pinned,
-  onSelectInterpreter,
+  onSelectRuntime,
   onCreateVenv,
   onSave,
   onEditCurrentFile,
@@ -50,8 +51,13 @@ export function IdeTitleBar({
   onClose
 }: IdeTitleBarProps) {
   const activePath = activeDocument?.relativePath ?? "";
-  const activePython = supportsPythonExecution(activePath);
+  const language = languageForPath(activePath);
+  const runtimeAction = runtimeActionForPath(activePath);
+  const selectedRuntime = runtimes.find((runtime) => runtime.id === selectedRuntimeId) ?? runtimes[0];
   const activeCodexEdit = supportsCodexEdit(activePath);
+  const actionLabel = runtimeAction === "preview"
+    ? `Preview ${language.label}`
+    : runtimeAction === "validate" ? `Validate ${language.label}` : `Run ${language.label}`;
   return (
     <header className="titlebar">
       <div className="titlebar-project">
@@ -64,24 +70,33 @@ export function IdeTitleBar({
           {theme === "light" ? <Sun size={14} /> : <Moon size={14} />}
           Auto
         </span>
-        {interpreters.length > 0 ? (
-          <select aria-label="Python interpreter" value={selectedInterpreterId} onChange={(event) => onSelectInterpreter(event.target.value)}>
-            {interpreters.map((interpreter) => (
-              <option key={interpreter.id} value={interpreter.id}>{interpreter.version} · {interpreter.executable}</option>
+        {runtimes.length > 0 ? (
+          <select aria-label={`${language.label} runtime`} value={selectedRuntimeId || runtimes[0]?.id} onChange={(event) => onSelectRuntime(event.target.value)}>
+            {runtimes.map((runtime) => (
+              <option key={runtime.id} value={runtime.id} disabled={!runtime.available}>
+                {runtime.label}{runtime.executable ? ` · ${runtime.executable}` : ""}
+              </option>
             ))}
           </select>
-        ) : (
+        ) : language.id === "python" ? (
           <button type="button" onClick={onCreateVenv}>Create .venv</button>
-        )}
+        ) : <span className="runtime-unavailable">No runtime</span>}
         <button type="button" onClick={onSave} disabled={!activeDocument?.dirty}>
           <Save size={15} strokeWidth={1.7} aria-hidden="true" /> Save
         </button>
         <button type="button" onClick={onEditCurrentFile} disabled={!activeCodexEdit || activeDocument?.readonly}>
           <Sparkles size={15} strokeWidth={1.7} aria-hidden="true" /> Edit current file
         </button>
-        <button className="run-button" type="button" onClick={onRun} disabled={running || !activePython || !selectedInterpreterId}>
-          <Play size={15} strokeWidth={1.8} fill="currentColor" aria-hidden="true" />
-          {running ? "Running…" : "Run Python"}
+        <button
+          className="run-button"
+          type="button"
+          onClick={onRun}
+          disabled={!running && (!activeDocument || runtimeAction === null || !selectedRuntime?.available)}
+        >
+          {running
+            ? <Square size={13} strokeWidth={1.8} fill="currentColor" aria-hidden="true" />
+            : <Play size={15} strokeWidth={1.8} fill="currentColor" aria-hidden="true" />}
+          {running ? "Stop" : actionLabel}
         </button>
         <button
           type="button"

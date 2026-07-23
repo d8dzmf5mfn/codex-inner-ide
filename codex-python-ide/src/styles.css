@@ -398,11 +398,110 @@ select:focus-visible {
   min-height: 0;
 }
 
+.editor-main-row {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+}
+
 .editor-pane {
   display: grid;
+  flex: 1 1 auto;
   grid-template-rows: 36px minmax(0, 1fr);
   min-width: 0;
   min-height: 0;
+}
+
+.preview-pane {
+  display: grid;
+  width: min(44%, 620px);
+  min-width: 320px;
+  min-height: 0;
+  grid-template-rows: 36px minmax(0, 1fr);
+  border-left: 1px solid var(--border);
+  background: #fff;
+}
+
+.preview-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 8px 0 12px;
+  border-bottom: 1px solid var(--border);
+  color: #555b63;
+  background: #fafafb;
+  font-size: 11px;
+}
+
+.preview-heading > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.preview-heading > span:last-child {
+  display: inline-flex;
+  gap: 3px;
+}
+
+.preview-heading button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 25px;
+  height: 25px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+}
+
+.preview-heading button:hover {
+  background: #eceef1;
+}
+
+.web-preview-frame {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: #fff;
+}
+
+.markdown-preview {
+  overflow: auto;
+  padding: 24px 30px 48px;
+  color: #25282d;
+  background: #fff;
+  font: 14px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.markdown-preview h1,
+.markdown-preview h2,
+.markdown-preview h3 {
+  margin: 1.35em 0 0.55em;
+  line-height: 1.25;
+}
+
+.markdown-preview h1:first-child,
+.markdown-preview h2:first-child,
+.markdown-preview h3:first-child {
+  margin-top: 0;
+}
+
+.markdown-preview pre {
+  overflow: auto;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #f6f7f8;
+  font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.markdown-list-item {
+  padding-left: 10px;
 }
 
 .editor-pane-with-proposal {

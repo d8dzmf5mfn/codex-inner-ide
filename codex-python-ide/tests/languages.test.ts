@@ -5,6 +5,7 @@ import {
   preferredInitialFilePath,
   registeredLanguageForPath,
   resolveNewFileName,
+  runtimeActionForPath,
   selectionLanguageForPath,
   supportsCodexEdit,
   supportsPythonExecution
@@ -34,13 +35,21 @@ describe("language registry", () => {
     }
   });
 
-  it("keeps execution and Codex edit capabilities Python-only", () => {
+  it("maps each language to its runtime action while keeping Codex edit Python-only", () => {
     expect(supportsPythonExecution("main.py")).toBe(true);
     expect(supportsCodexEdit("main.py")).toBe(true);
     expect(supportsPythonExecution("Main.java")).toBe(false);
     expect(supportsCodexEdit("src/App.ts")).toBe(false);
     expect(languageForPath("SCRIPT.PY").id).toBe("python");
     expect(supportsPythonExecution("SCRIPT.PY")).toBe(false);
+    expect(runtimeActionForPath("Main.java")).toBe("run");
+    expect(runtimeActionForPath("app.js")).toBe("run");
+    expect(runtimeActionForPath("app.ts")).toBe("run");
+    expect(runtimeActionForPath("index.html")).toBe("preview");
+    expect(runtimeActionForPath("styles.css")).toBe("preview");
+    expect(runtimeActionForPath("data.json")).toBe("validate");
+    expect(runtimeActionForPath("README.md")).toBe("preview");
+    expect(runtimeActionForPath("notes.txt")).toBeNull();
   });
 
   it("uses real language ids for handoff and text for unknown files", () => {

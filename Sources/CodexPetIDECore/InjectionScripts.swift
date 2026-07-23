@@ -238,6 +238,17 @@ public enum InjectionScripts {
               terminate: (runId) => call('python.terminate', { runId }),
               subscribe: (listener) => subscribe('python.event', listener)
             },
+            runtime: {
+              discover: (languageId) => call('runtime.discover', { languageId }),
+              execute: (request) => call('runtime.execute', request),
+              check: (request) => call('runtime.check', request),
+              terminate: (runId) => call('runtime.terminate', { runId }),
+              subscribe: (listener) => subscribe('runtime.event', listener)
+            },
+            preview: {
+              open: (request) => call('preview.open', request),
+              openExternal: (request) => call('preview.openExternal', request)
+            },
             chatgpt: {
               moreDetails: (context) => call('chatgpt.moreDetails', context)
             },

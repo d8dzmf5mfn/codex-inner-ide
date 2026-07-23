@@ -35,6 +35,28 @@ export type PythonInterpreter = {
   source: "task" | ".venv" | "venv" | "path";
 };
 
+export type RuntimeAction = "run" | "preview" | "validate" | "none";
+
+export type RuntimeDescriptor = {
+  id: string;
+  languageId: string;
+  label: string;
+  version: string;
+  executable?: string | null;
+  source: "task" | ".venv" | "venv" | "project" | "path" | "builtin" | "missing" | string;
+  action: RuntimeAction;
+  available: boolean;
+  unavailableReason?: string | null;
+};
+
+export type RuntimeExecuteRequest = {
+  relativePath: string;
+  languageId: string;
+  runtimeId?: string | null;
+};
+
+export type RuntimeCheckRequest = RuntimeExecuteRequest;
+
 export type Diagnostic = {
   relativePath: string;
   line: number;
@@ -50,6 +72,24 @@ export type PythonExecutionEvent = {
   text?: string | null;
   exitCode?: number | null;
   diagnostics?: Diagnostic[] | null;
+};
+
+export type RuntimeExecutionEvent = {
+  runId: string;
+  languageId: string;
+  kind: "started" | "output" | "exited" | "failed";
+  stream?: "stdout" | "stderr" | null;
+  text?: string | null;
+  exitCode?: number | null;
+  diagnostics?: Diagnostic[] | null;
+};
+
+export type PreviewDescriptor = {
+  relativePath: string;
+  languageId: string;
+  url?: string | null;
+  content?: string | null;
+  entryRelativePath?: string | null;
 };
 
 export type FileChange = {
@@ -158,6 +198,17 @@ export interface CodexInnerIdeHostV1 {
     terminate(runId: string): Promise<void>;
     checkSyntax(relativePath: string, interpreterId: string): Promise<Diagnostic[]>;
     subscribe(listener: (event: PythonExecutionEvent) => void): Unsubscribe;
+  };
+  runtime: {
+    discover(languageId: string): Promise<RuntimeDescriptor[]>;
+    execute(request: RuntimeExecuteRequest): Promise<{ runId: string }>;
+    check(request: RuntimeCheckRequest): Promise<Diagnostic[]>;
+    terminate(runId: string): Promise<void>;
+    subscribe(listener: (event: RuntimeExecutionEvent) => void): Unsubscribe;
+  };
+  preview: {
+    open(request: RuntimeExecuteRequest & { htmlEntryRelativePath?: string | null }): Promise<PreviewDescriptor>;
+    openExternal(request: RuntimeExecuteRequest & { htmlEntryRelativePath?: string | null }): Promise<PreviewDescriptor>;
   };
   chatgpt: {
     moreDetails(context: IdeSelectionContext): Promise<HandoffResult>;

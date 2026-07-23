@@ -307,6 +307,71 @@ public struct PythonInterpreter: Codable, Equatable, Sendable {
     public let source: String
 }
 
+public enum RuntimeAction: String, Codable, Equatable, Sendable {
+    case run
+    case preview
+    case validate
+    case none
+}
+
+public struct RuntimeDescriptor: Codable, Equatable, Sendable {
+    public let id: String
+    public let languageId: String
+    public let label: String
+    public let version: String
+    public let executable: String?
+    public let source: String
+    public let action: RuntimeAction
+    public let available: Bool
+    public let unavailableReason: String?
+
+    public init(
+        id: String,
+        languageId: String,
+        label: String,
+        version: String,
+        executable: String? = nil,
+        source: String,
+        action: RuntimeAction,
+        available: Bool = true,
+        unavailableReason: String? = nil
+    ) {
+        self.id = id
+        self.languageId = languageId
+        self.label = label
+        self.version = version
+        self.executable = executable
+        self.source = source
+        self.action = action
+        self.available = available
+        self.unavailableReason = unavailableReason
+    }
+}
+
+public struct RuntimeExecuteRequest: Codable, Equatable, Sendable {
+    public let relativePath: String
+    public let languageId: String
+    public let runtimeId: String?
+
+    public init(relativePath: String, languageId: String, runtimeId: String? = nil) {
+        self.relativePath = relativePath
+        self.languageId = languageId
+        self.runtimeId = runtimeId
+    }
+}
+
+public struct RuntimeCheckRequest: Codable, Equatable, Sendable {
+    public let relativePath: String
+    public let languageId: String
+    public let runtimeId: String?
+
+    public init(relativePath: String, languageId: String, runtimeId: String? = nil) {
+        self.relativePath = relativePath
+        self.languageId = languageId
+        self.runtimeId = runtimeId
+    }
+}
+
 public struct Diagnostic: Codable, Equatable, Sendable {
     public let relativePath: String
     public let line: Int
@@ -337,6 +402,68 @@ public struct PythonExecutionEvent: Codable, Equatable, Sendable {
         self.text = text
         self.exitCode = exitCode
         self.diagnostics = diagnostics
+    }
+}
+
+public struct RuntimeExecutionEvent: Codable, Equatable, Sendable {
+    public let runId: String
+    public let languageId: String
+    public let kind: String
+    public let stream: String?
+    public let text: String?
+    public let exitCode: Int?
+    public let diagnostics: [Diagnostic]?
+
+    public init(
+        runId: String,
+        languageId: String,
+        kind: String,
+        stream: String? = nil,
+        text: String? = nil,
+        exitCode: Int? = nil,
+        diagnostics: [Diagnostic]? = nil
+    ) {
+        self.runId = runId
+        self.languageId = languageId
+        self.kind = kind
+        self.stream = stream
+        self.text = text
+        self.exitCode = exitCode
+        self.diagnostics = diagnostics
+    }
+
+    public init(python event: PythonExecutionEvent) {
+        self.init(
+            runId: event.runId,
+            languageId: "python",
+            kind: event.kind,
+            stream: event.stream,
+            text: event.text,
+            exitCode: event.exitCode,
+            diagnostics: event.diagnostics
+        )
+    }
+}
+
+public struct PreviewDescriptor: Codable, Equatable, Sendable {
+    public let relativePath: String
+    public let languageId: String
+    public let url: String?
+    public let content: String?
+    public let entryRelativePath: String?
+
+    public init(
+        relativePath: String,
+        languageId: String,
+        url: String? = nil,
+        content: String? = nil,
+        entryRelativePath: String? = nil
+    ) {
+        self.relativePath = relativePath
+        self.languageId = languageId
+        self.url = url
+        self.content = content
+        self.entryRelativePath = entryRelativePath
     }
 }
 

@@ -32,6 +32,28 @@ describe("development Inner IDE host", () => {
     expect(events.join("")).toContain("Codex Inner IDE is ready");
   });
 
+  it("exposes run, validate, and preview actions through the shared runtime contract", async () => {
+    const host = createMockInnerHost();
+    const [java] = await host.runtime.discover("java");
+    const events: string[] = [];
+    host.runtime.subscribe((event) => {
+      if (event.text) events.push(event.text);
+    });
+
+    await host.runtime.execute({ relativePath: "Main.java", languageId: "java", runtimeId: java.id });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(events.join("")).toContain("Ran Main.java");
+    await expect(host.runtime.check({
+      relativePath: "data.json",
+      languageId: "json",
+      runtimeId: "mock-json"
+    })).resolves.toEqual([]);
+    await expect(host.preview.open({
+      relativePath: "README.md",
+      languageId: "markdown"
+    })).resolves.toMatchObject({ content: expect.stringContaining("Python example") });
+  });
+
   it("routes More details to ChatGPT without submitting", async () => {
     const host = createMockInnerHost();
     const context = {

@@ -8,7 +8,9 @@ import type {
   IdeWindowState,
   PythonExecutionEvent,
   PythonEditProposalEvent,
-  PythonInterpreter
+  PythonInterpreter,
+  RuntimeDescriptor,
+  RuntimeExecutionEvent
 } from "../types/inner-host";
 
 const initialFiles: Record<string, string> = {
@@ -35,7 +37,13 @@ def test_count_words(tmp_path: Path) -> None:
     sample.write_text("one two three", encoding="utf-8")
     assert count_words(sample) == 3
 `,
-  "README.md": "# Python example\n\nOpened by the Codex Inner IDE development host.\n"
+  "README.md": "# Python example\n\nOpened by the Codex Inner IDE development host.\n",
+  "Main.java": "public class Main { public static void main(String[] args) { System.out.println(\"Hello Java\"); } }\n",
+  "app.js": "console.log(\"Hello JavaScript\");\n",
+  "app.ts": "const message: string = \"Hello TypeScript\";\nconsole.log(message);\n",
+  "index.html": "<!doctype html><html><head><link rel=\"stylesheet\" href=\"styles.css\"></head><body><h1>HTML Preview</h1></body></html>\n",
+  "styles.css": "body { font-family: system-ui; padding: 2rem; }\n",
+  "data.json": "{\"ready\": true}\n"
 };
 
 function randomId(): string {
@@ -88,6 +96,7 @@ export function createMockInnerHost(): CodexInnerIdeHostV1 {
   const directories = new Set<string>(["tests"]);
   const fileListeners = new Set<(change: FileChange) => void>();
   const pythonListeners = new Set<(event: PythonExecutionEvent) => void>();
+  const runtimeListeners = new Set<(event: RuntimeExecutionEvent) => void>();
   const editListeners = new Set<(event: PythonEditProposalEvent) => void>();
   let state: IdeWindowState | null = null;
 
@@ -99,6 +108,21 @@ export function createMockInnerHost(): CodexInnerIdeHostV1 {
   };
 
   const emitFile = (change: FileChange) => fileListeners.forEach((listener) => listener(change));
+  const descriptor = (languageId: string): RuntimeDescriptor => {
+    const action = languageId === "html" || languageId === "css" || languageId === "markdown"
+      ? "preview"
+      : languageId === "json" ? "validate" : languageId === "plaintext" ? "none" : "run";
+    return {
+      id: `mock-${languageId}`,
+      languageId,
+      label: action === "preview" ? `${languageId.toUpperCase()} Preview` : `Mock ${languageId}`,
+      version: "Development",
+      source: action === "preview" || action === "validate" ? "builtin" : "path",
+      action,
+      available: action !== "none",
+      unavailableReason: action === "none" ? "Plain text cannot run" : null
+    };
+  };
 
   return {
     apiVersion: "1",
@@ -205,6 +229,69 @@ export function createMockInnerHost(): CodexInnerIdeHostV1 {
         pythonListeners.add(listener);
         return () => pythonListeners.delete(listener);
       }
+    },
+    runtime: {
+      async discover(languageId) { return [descriptor(languageId)]; },
+      async execute(request) {
+        const runId = randomId();
+        queueMicrotask(() => {
+          runtimeListeners.forEach((listener) => listener({
+            runId,
+            languageId: request.languageId,
+            kind: "started"
+          }));
+          const text = request.languageId === "json" ? "Valid JSON\n" : `Ran ${request.relativePath}\n`;
+          runtimeListeners.forEach((listener) => listener({
+            runId,
+            languageId: request.languageId,
+            kind: "output",
+            stream: "stdout",
+            text
+          }));
+          runtimeListeners.forEach((listener) => listener({
+            runId,
+            languageId: request.languageId,
+            kind: "exited",
+            exitCode: 0,
+            diagnostics: []
+          }));
+        });
+        return { runId };
+      },
+      async terminate(runId) {
+        runtimeListeners.forEach((listener) => listener({
+          runId,
+          languageId: "plaintext",
+          kind: "exited",
+          exitCode: 143
+        }));
+      },
+      async check() { return []; },
+      subscribe(listener) {
+        runtimeListeners.add(listener);
+        return () => runtimeListeners.delete(listener);
+      }
+    },
+    preview: {
+      async open(request) {
+        if (request.languageId === "markdown") {
+          return {
+            relativePath: request.relativePath,
+            languageId: request.languageId,
+            content: files.get(request.relativePath) ?? "",
+            entryRelativePath: request.relativePath
+          };
+        }
+        const entry = request.languageId === "css" ? "index.html" : request.relativePath;
+        const content = files.get(entry) ?? "<p>Preview unavailable</p>";
+        return {
+          relativePath: request.relativePath,
+          languageId: request.languageId,
+          url: `data:text/html;charset=utf-8,${encodeURIComponent(content)}`,
+          entryRelativePath: entry
+        };
+      },
+      async openExternal(request) { return this.open(request); }
     },
     chatgpt: {
       async moreDetails() { return handoff(); }
