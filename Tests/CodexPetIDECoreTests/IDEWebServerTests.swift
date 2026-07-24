@@ -3,6 +3,41 @@ import XCTest
 @testable import CodexPetIDECore
 
 final class IDEWebServerTests: XCTestCase {
+    func testWaitUntilReadyAllowsDelayedBrowserStartup() async {
+        let server = IDEWebServer(
+            rendererAssets: RendererAssets(script: "", style: ""),
+            sessionToken: "test-token"
+        ) { request in
+            .success(request.requestId)
+        }
+        let clientId = UUID().uuidString.lowercased()
+
+        async let ready = server.waitUntilReady(
+            clientId: clientId,
+            timeout: .milliseconds(250)
+        )
+        try? await Task.sleep(for: .milliseconds(50))
+        server.markReady(clientId: clientId)
+
+        let didBecomeReady = await ready
+        XCTAssertTrue(didBecomeReady)
+    }
+
+    func testWaitUntilReadyStillFailsClosedAfterTimeout() async {
+        let server = IDEWebServer(
+            rendererAssets: RendererAssets(script: "", style: ""),
+            sessionToken: "test-token"
+        ) { request in
+            .success(request.requestId)
+        }
+
+        let didBecomeReady = await server.waitUntilReady(
+            clientId: UUID().uuidString.lowercased(),
+            timeout: .milliseconds(20)
+        )
+        XCTAssertFalse(didBecomeReady)
+    }
+
     func testLoopbackDocumentDoesNotEmbedSessionTokenAndRPCRequiresAuthentication() async throws {
         let token = UUID().uuidString.lowercased()
         let server = IDEWebServer(

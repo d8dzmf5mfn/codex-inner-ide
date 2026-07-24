@@ -49,6 +49,33 @@ final class CompatibilityProfileTests: XCTestCase {
     }
 }
 
+final class CodexLaunchArgumentsTests: XCTestCase {
+    func testFindsLoopbackRemoteDebuggingPort() {
+        XCTAssertEqual(
+            CodexLaunchArguments.remoteDebuggingPort(in: [
+                "/Applications/ChatGPT.app/Contents/MacOS/ChatGPT",
+                "--remote-debugging-address=127.0.0.1",
+                "--remote-debugging-port=49686"
+            ]),
+            49_686
+        )
+    }
+
+    func testRejectsMissingLoopbackAddressAndInvalidPorts() {
+        XCTAssertNil(CodexLaunchArguments.remoteDebuggingPort(in: [
+            "--remote-debugging-port=49686"
+        ]))
+        XCTAssertNil(CodexLaunchArguments.remoteDebuggingPort(in: [
+            "--remote-debugging-address=0.0.0.0",
+            "--remote-debugging-port=49686"
+        ]))
+        XCTAssertNil(CodexLaunchArguments.remoteDebuggingPort(in: [
+            "--remote-debugging-address=127.0.0.1",
+            "--remote-debugging-port=70000"
+        ]))
+    }
+}
+
 final class WorkspaceServiceTests: XCTestCase {
     private var temporaryURL: URL!
 
@@ -490,5 +517,43 @@ final class AppServerIntegrationTests: XCTestCase {
             ]),
             timeout: 20
         )
+    }
+}
+
+final class LiveCDPIntegrationTests: XCTestCase {
+    func testRecoversDebugPortFromRunningCodexWhenRequested() async throws {
+        guard let portText = ProcessInfo.processInfo.environment["CODEX_INNER_IDE_CDP_PORT"],
+              let expectedPort = Int(portText)
+        else {
+            throw XCTSkip("Set CODEX_INNER_IDE_CDP_PORT to test a running Codex CDP endpoint")
+        }
+
+        let launcher = await MainActor.run { CodexLauncher() }
+        let recoveredPort = await launcher.runningDebugPort()
+        XCTAssertEqual(recoveredPort, expectedPort)
+    }
+
+    func testConnectsToRunningCodexWhenRequested() async throws {
+        guard let portText = ProcessInfo.processInfo.environment["CODEX_INNER_IDE_CDP_PORT"],
+              let port = Int(portText)
+        else {
+            throw XCTSkip("Set CODEX_INNER_IDE_CDP_PORT to test a running Codex CDP endpoint")
+        }
+
+        let target = try await CDPTargetDiscovery.waitForTarget(
+            port: port,
+            timeout: 5,
+            matching: CDPValidation.isMainTarget
+        )
+        let session = try CDPSession(target: target, port: port)
+        do {
+            try await session.connect()
+            let href = try await session.evaluate("location.href")
+            XCTAssertTrue(href.stringValue?.hasPrefix("app://") == true)
+        } catch {
+            await session.close()
+            throw error
+        }
+        await session.close()
     }
 }

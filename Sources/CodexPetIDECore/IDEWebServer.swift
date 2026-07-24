@@ -109,7 +109,7 @@ public final class IDEWebServer: @unchecked Sendable {
         values.1.forEach { $0.resume(returning: false) }
     }
 
-    public func waitUntilReady(clientId: String, timeout: Duration = .seconds(3)) async -> Bool {
+    public func waitUntilReady(clientId: String, timeout: Duration = .seconds(12)) async -> Bool {
         if lock.withLock({ readyClients.contains(clientId) }) { return true }
         let waiterID = UUID()
         return await withCheckedContinuation { continuation in

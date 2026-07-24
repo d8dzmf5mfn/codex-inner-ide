@@ -1,4 +1,5 @@
 import AppKit
+import Darwin
 import Foundation
 
 public struct CompatibilityProfile: Codable, Equatable, Sendable {
@@ -128,6 +129,53 @@ public struct CodexInstallation: Equatable, Sendable {
     }
 }
 
+enum CodexLaunchArguments {
+    static func remoteDebuggingPort(in arguments: [String]) -> Int? {
+        guard arguments.contains("--remote-debugging-address=127.0.0.1") else { return nil }
+        let prefix = "--remote-debugging-port="
+        guard let value = arguments.first(where: { $0.hasPrefix(prefix) })?.dropFirst(prefix.count),
+              let port = Int(value),
+              (1...65_535).contains(port)
+        else { return nil }
+        return port
+    }
+
+    static func read(processIdentifier: pid_t) -> [String] {
+        var mib = [CTL_KERN, KERN_PROCARGS2, processIdentifier]
+        var size = 0
+        guard sysctl(&mib, u_int(mib.count), nil, &size, nil, 0) == 0, size > 0 else {
+            return []
+        }
+
+        var bytes = [UInt8](repeating: 0, count: size)
+        guard sysctl(&mib, u_int(mib.count), &bytes, &size, nil, 0) == 0,
+              size >= MemoryLayout<Int32>.size
+        else { return [] }
+
+        let argumentCount = bytes.withUnsafeBytes { rawBuffer in
+            Int(rawBuffer.load(as: Int32.self))
+        }
+        guard argumentCount > 0 else { return [] }
+
+        var offset = MemoryLayout<Int32>.size
+        while offset < size, bytes[offset] != 0 { offset += 1 }
+        while offset < size, bytes[offset] == 0 { offset += 1 }
+
+        var arguments: [String] = []
+        arguments.reserveCapacity(argumentCount)
+        while offset < size, arguments.count < argumentCount {
+            let start = offset
+            while offset < size, bytes[offset] != 0 { offset += 1 }
+            if start < offset,
+               let argument = String(bytes: bytes[start..<offset], encoding: .utf8) {
+                arguments.append(argument)
+            }
+            while offset < size, bytes[offset] == 0 { offset += 1 }
+        }
+        return arguments
+    }
+}
+
 @MainActor
 public final class CodexLauncher {
     public private(set) var launchedPort: Int?
@@ -139,6 +187,24 @@ public final class CodexLauncher {
         NSRunningApplication.runningApplications(
             withBundleIdentifier: CodexInstallation.bundleIdentifier
         )
+    }
+
+    public func runningDebugPort() async -> Int? {
+        if let launchedPort, await isUsableDebugPort(launchedPort) {
+            return launchedPort
+        }
+        for application in runningApplications {
+            let arguments = CodexLaunchArguments.read(
+                processIdentifier: application.processIdentifier
+            )
+            guard let port = CodexLaunchArguments.remoteDebuggingPort(in: arguments) else {
+                continue
+            }
+            if await isUsableDebugPort(port) {
+                return port
+            }
+        }
+        return nil
     }
 
     public func terminateRunningApplications(timeout: TimeInterval = 10) async -> Bool {
@@ -167,5 +233,12 @@ public final class CodexLauncher {
         )
         launchedPort = port
         launchedApplication = application
+    }
+
+    private func isUsableDebugPort(_ port: Int) async -> Bool {
+        guard let targets = try? await CDPTargetDiscovery.listTargets(port: port) else {
+            return false
+        }
+        return targets.contains(where: CDPValidation.isMainTarget)
     }
 }

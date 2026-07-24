@@ -208,10 +208,10 @@ final class ControllerCoordinator: IDEWindowControllerDelegate {
             let baseURL = try await ensureBrowserServer()
             let clientId = UUID().uuidString.lowercased()
             let targetURL = "\(baseURL.absoluteString):\(clientId)"
-            let opened = try await mainSession.evaluate(
-                "window.open(\(InjectionScripts.javaScriptLiteral(targetURL)), 'codex-inner-ide') !== null"
-            ).boolValue == true
-            guard opened, await ideWebServer?.waitUntilReady(clientId: clientId) == true else {
+            _ = try await mainSession.evaluate(
+                "window.open(\(InjectionScripts.javaScriptLiteral(targetURL)), 'codex-inner-ide'); true"
+            )
+            guard await ideWebServer?.waitUntilReady(clientId: clientId) == true else {
                 browserFallbackReason = "The Codex Browser did not complete the local IDE handshake."
                 return false
             }
@@ -539,6 +539,16 @@ final class ControllerCoordinator: IDEWindowControllerDelegate {
         let compatibilityProfile = try installation.validateCompatibility()
         self.compatibilityProfile = compatibilityProfile
 
+        if let runningPort = await launcher.runningDebugPort() {
+            do {
+                try await connectMainSession(port: runningPort, timeout: 10)
+                return
+            } catch {
+                mainSession = nil
+                mainTargetID = nil
+            }
+        }
+
         if !launcher.runningApplications.isEmpty {
             let alert = NSAlert()
             if forChatHandoff {
@@ -562,28 +572,44 @@ final class ControllerCoordinator: IDEWindowControllerDelegate {
 
         let port = try LoopbackPort.reserve()
         try await launcher.launch(installation, port: port)
-        self.port = port
-        let mainTarget = try await CDPTargetDiscovery.waitForTarget(
-            port: port,
-            timeout: 30,
-            matching: CDPValidation.isMainTarget
-        )
-        let session = try CDPSession(target: mainTarget, port: port)
-        try await session.connect()
-        do {
-            try await waitForMainRendererShell(session)
-            _ = try await session.send(method: "Runtime.addBinding", params: [
-                "name": .string(InjectionScripts.mainBindingName)
-            ])
-        } catch {
-            await session.close()
-            throw error
-        }
+        try await connectMainSession(port: port, timeout: 30)
+    }
 
-        mainSession = session
-        mainTargetID = mainTarget.id
-        observeMainEvents(session)
-        _ = try await injectMainEntry()
+    private func connectMainSession(port: Int, timeout: TimeInterval) async throws {
+        let deadline = Date().addingTimeInterval(timeout)
+        var lastError: Error?
+        while Date() < deadline {
+            var session: CDPSession?
+            do {
+                guard let mainTarget = try await CDPTargetDiscovery
+                    .listTargets(port: port)
+                    .first(where: CDPValidation.isMainTarget)
+                else {
+                    throw InnerIDEError.cdpUnavailable("matching renderer target is not ready")
+                }
+                let candidate = try CDPSession(target: mainTarget, port: port)
+                session = candidate
+                try await candidate.connect()
+                try await waitForMainRendererShell(candidate, timeout: 3)
+                _ = try await candidate.send(method: "Runtime.addBinding", params: [
+                    "name": .string(InjectionScripts.mainBindingName)
+                ])
+
+                self.port = port
+                mainSession = candidate
+                mainTargetID = mainTarget.id
+                observeMainEvents(candidate)
+                _ = try await injectMainEntry()
+                return
+            } catch {
+                lastError = error
+                if let session { await session.close() }
+                try await Task.sleep(for: .milliseconds(300))
+            }
+        }
+        throw InnerIDEError.cdpUnavailable(
+            lastError?.localizedDescription ?? "Codex renderer connection timed out"
+        )
     }
 
     private func injectMainEntry() async throws -> Bool {

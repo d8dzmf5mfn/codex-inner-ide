@@ -25,7 +25,7 @@ macOS 本地扩展：在 Codex `Files` 下方注入 `IDE` 入口，并优先在 
 
 ## 下载
 
-- 最新公开预览版为 [`v0.4.1-preview`](https://github.com/d8dzmf5mfn/codex-inner-ide/releases/tag/v0.4.1-preview)。
+- 最新公开预览版为 [`v0.4.2-preview`](https://github.com/d8dzmf5mfn/codex-inner-ide/releases/tag/v0.4.2-preview)。
 - 当前提供 Apple Silicon、macOS 14+ 构建。
 - 下载 ZIP 和 `.sha256` 文件后，请先核对摘要。
 
@@ -44,8 +44,8 @@ macOS 本地扩展：在 Codex `Files` 下方注入 `IDE` 入口，并优先在 
 输出：
 
 - 安装并启动：`~/Applications/Codex Inner IDE.app`
-- 分发包：`dist/Codex.Inner.IDE-v0.4.1-preview-macos-arm64.zip`
-- 校验文件：`dist/Codex.Inner.IDE-v0.4.1-preview-macos-arm64.zip.sha256`
+- 分发包：`dist/Codex.Inner.IDE-v0.4.2-preview-macos-arm64.zip`
+- 校验文件：`dist/Codex.Inner.IDE-v0.4.2-preview-macos-arm64.zip.sha256`
 - 插件包：`dist/codex-inner-edit-v0.1.0.zip`
 
 只生成分发包、不替换当前安装：
@@ -98,6 +98,6 @@ Swift 集成测试调用 `/Applications/ChatGPT.app/Contents/Resources/codex app
 
 ## 分发状态
 
-- `v0.4.1-preview` 是 Apple Silicon preview，不是已公证的正式版本。
+- `v0.4.2-preview` 是 Apple Silicon preview，不是已公证的正式版本。
 - 当前机器没有可用的 Apple Developer ID；Release ZIP 会保留 ad-hoc 签名。
 - 第三方组件及许可证见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
