@@ -196,7 +196,8 @@ final class ControllerCoordinator: IDEWindowControllerDelegate {
     }
 
     private var browserFirstCompatible: Bool {
-        compatibilityProfile?.appVersion == "26.715.72359"
+        guard let appVersion = compatibilityProfile?.appVersion else { return false }
+        return ["26.715.72359", "26.721.30844"].contains(appVersion)
     }
 
     private func openBrowserIDE(taskKey: String) async -> Bool {

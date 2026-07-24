@@ -14,14 +14,23 @@ final class CompatibilityProfileTests: XCTestCase {
 
     func testCurrentProfileUsesDesktopRendererProfile() {
         let profile = CompatibilityProfile.match(
-            appVersion: "26.715.72359",
-            codexCLIVersion: "codex-cli 0.145.0-alpha.30"
+            appVersion: "26.721.30844",
+            codexCLIVersion: "codex-cli 0.146.0-alpha.3"
         )
 
         XCTAssertEqual(profile?.rendererProfile, "desktop-v1")
     }
 
     func testPreviousProfileRemainsSupported() {
+        let profile = CompatibilityProfile.match(
+            appVersion: "26.715.72359",
+            codexCLIVersion: "codex-cli 0.145.0-alpha.30"
+        )
+
+        XCTAssertEqual(profile?.appVersion, "26.715.72359")
+    }
+
+    func testEarlierProfileRemainsSupported() {
         let profile = CompatibilityProfile.match(
             appVersion: "26.715.72028",
             codexCLIVersion: "codex-cli 0.145.0-alpha.30"
