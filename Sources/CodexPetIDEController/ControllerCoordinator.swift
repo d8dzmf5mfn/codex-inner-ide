@@ -197,7 +197,7 @@ final class ControllerCoordinator: IDEWindowControllerDelegate {
 
     private var browserFirstCompatible: Bool {
         guard let appVersion = compatibilityProfile?.appVersion else { return false }
-        return ["26.715.72359", "26.721.30844"].contains(appVersion)
+        return ["26.715.72359", "26.721.30844", "26.721.41059"].contains(appVersion)
     }
 
     private func openBrowserIDE(taskKey: String) async -> Bool {
@@ -209,7 +209,17 @@ final class ControllerCoordinator: IDEWindowControllerDelegate {
             let clientId = UUID().uuidString.lowercased()
             let targetURL = "\(baseURL.absoluteString):\(clientId)"
             _ = try await mainSession.evaluate(
-                "window.open(\(InjectionScripts.javaScriptLiteral(targetURL)), 'codex-inner-ide'); true"
+                """
+                (() => {
+                  const ideWindow = window.open(
+                    \(InjectionScripts.javaScriptLiteral(targetURL)),
+                    'codex-inner-ide'
+                  );
+                  ideWindow?.focus();
+                  return true;
+                })()
+                """,
+                userGesture: true
             )
             guard await ideWebServer?.waitUntilReady(clientId: clientId) == true else {
                 browserFallbackReason = "The Codex Browser did not complete the local IDE handshake."

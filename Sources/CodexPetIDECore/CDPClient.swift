@@ -210,12 +210,16 @@ public actor CDPSession {
         }
     }
 
-    public func evaluate(_ expression: String, awaitPromise: Bool = true) async throws -> JSONValue {
+    public func evaluate(
+        _ expression: String,
+        awaitPromise: Bool = true,
+        userGesture: Bool = false
+    ) async throws -> JSONValue {
         let response = try await send(method: "Runtime.evaluate", params: [
             "expression": .string(expression),
             "awaitPromise": .bool(awaitPromise),
             "returnByValue": .bool(true),
-            "userGesture": .bool(false),
+            "userGesture": .bool(userGesture),
             "allowUnsafeEvalBlockedByCSP": .bool(true)
         ])
         if let details = response["exceptionDetails"]?.objectValue {
