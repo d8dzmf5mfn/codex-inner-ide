@@ -99,6 +99,7 @@ export function IdeTitleBar({
         <Code2 size={17} strokeWidth={1.6} aria-hidden="true" />
         <span>{workspace.name}</span>
         <span className="root-label">{workspace.rootLabel}</span>
+        {hostMode === "mock" && <span className="demo-host-badge">Demo host · no real execution</span>}
       </div>
       <div className="titlebar-actions">
         <select

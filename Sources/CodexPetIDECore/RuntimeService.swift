@@ -13,6 +13,7 @@ public actor RuntimeService {
     private var activeRunID: String?
     private var activeLanguageID: String?
     private var output = ""
+    private var streamedCommandOutput: [String: String] = [:]
 
     public init(
         client: AppServerClient,
@@ -98,6 +99,7 @@ public actor RuntimeService {
         activeRunID = runID
         activeLanguageID = request.languageId
         output = ""
+        streamedCommandOutput = [:]
         eventHandler?(RuntimeExecutionEvent(runId: runID, languageId: request.languageId, kind: "started"))
 
         if request.languageId == "json" {
@@ -460,6 +462,7 @@ public actor RuntimeService {
     }
 
     private func streamedCommand(runID: String, command: [String]) async throws -> Int {
+        streamedCommandOutput = ["stdout": "", "stderr": ""]
         let result = try await client.request(
             method: "command/exec",
             params: .object([
@@ -474,6 +477,15 @@ public actor RuntimeService {
             ]),
             timeout: 86_400
         )
+        for stream in ["stdout", "stderr"] {
+            let returned = result[stream]?.stringValue ?? ""
+            let streamed = streamedCommandOutput[stream] ?? ""
+            let suffix = RuntimeOutputReconciler.unstreamedSuffix(
+                returned: returned,
+                streamed: streamed
+            )
+            emitOutput(runID: runID, stream: stream, text: suffix)
+        }
         return result["exitCode"]?.intValue ?? -1
     }
 
@@ -509,6 +521,7 @@ public actor RuntimeService {
               let text = String(data: data, encoding: .utf8)
         else { return }
         let stream = params["stream"]?.stringValue ?? "stdout"
+        streamedCommandOutput[stream, default: ""] += text
         output += text
         eventHandler?(RuntimeExecutionEvent(
             runId: runID,
@@ -550,6 +563,7 @@ public actor RuntimeService {
         activeRunID = nil
         activeLanguageID = nil
         output = ""
+        streamedCommandOutput = [:]
     }
 
     private func freshRunCache(runID: String) throws -> URL {

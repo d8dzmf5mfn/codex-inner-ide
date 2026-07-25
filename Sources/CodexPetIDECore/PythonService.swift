@@ -8,6 +8,7 @@ public actor PythonService {
     private var interpreters: [PythonInterpreter] = []
     private var eventHandler: EventHandler?
     private var outputByRun: [String: String] = [:]
+    private var streamedOutputByRun: [String: [String: String]] = [:]
     private var activeRunIDs: Set<String> = []
     private var notificationHandlerID: UUID?
 
@@ -97,6 +98,7 @@ public actor PythonService {
         let runID = UUID().uuidString.lowercased()
         activeRunIDs.insert(runID)
         outputByRun[runID] = ""
+        streamedOutputByRun[runID] = ["stdout": "", "stderr": ""]
         eventHandler?(PythonExecutionEvent(runId: runID, kind: "started"))
         Task { [weak self] in
             await self?.executeRun(
@@ -155,9 +157,11 @@ public actor PythonService {
                 timeout: 86_400
             )
             let exitCode = result["exitCode"]?.intValue ?? -1
+            reconcileReturnedOutput(runID: runID, result: result)
             let diagnostics = parseDiagnostics(outputByRun[runID] ?? "")
             activeRunIDs.remove(runID)
             outputByRun.removeValue(forKey: runID)
+            streamedOutputByRun.removeValue(forKey: runID)
             eventHandler?(PythonExecutionEvent(
                 runId: runID,
                 kind: "exited",
@@ -168,6 +172,7 @@ public actor PythonService {
             activeRunIDs.remove(runID)
             let text = error.localizedDescription
             outputByRun.removeValue(forKey: runID)
+            streamedOutputByRun.removeValue(forKey: runID)
             eventHandler?(PythonExecutionEvent(runId: runID, kind: "failed", text: text, exitCode: -1))
         }
     }
@@ -181,7 +186,25 @@ public actor PythonService {
               let text = String(data: data, encoding: .utf8)
         else { return }
         let stream = params["stream"]?.stringValue ?? "stdout"
+        emitOutput(runID: runID, stream: stream, text: text)
+    }
+
+    private func reconcileReturnedOutput(runID: String, result: JSONValue) {
+        for stream in ["stdout", "stderr"] {
+            let returned = result[stream]?.stringValue ?? ""
+            let streamed = streamedOutputByRun[runID]?[stream] ?? ""
+            let suffix = RuntimeOutputReconciler.unstreamedSuffix(
+                returned: returned,
+                streamed: streamed
+            )
+            emitOutput(runID: runID, stream: stream, text: suffix)
+        }
+    }
+
+    private func emitOutput(runID: String, stream: String, text: String) {
+        guard !text.isEmpty, activeRunIDs.contains(runID) else { return }
         outputByRun[runID, default: ""] += text
+        streamedOutputByRun[runID, default: [:]][stream, default: ""] += text
         eventHandler?(PythonExecutionEvent(runId: runID, kind: "output", stream: stream, text: text))
     }
 

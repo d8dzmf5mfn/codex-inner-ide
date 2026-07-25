@@ -37,6 +37,11 @@ describe("IDE title bar host modes", () => {
     expect(markup).toContain('aria-label="Pin IDE window on top"');
   });
 
+  it("clearly labels the development host as non-executing", () => {
+    const markup = renderToStaticMarkup(<IdeTitleBar {...baseProps} hostMode="mock" />);
+    expect(markup).toContain("Demo host · no real execution");
+  });
+
   it("shows structured Setup guidance only for an unavailable runtime", () => {
     const markup = renderToStaticMarkup(<IdeTitleBar
       {...baseProps}

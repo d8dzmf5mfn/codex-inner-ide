@@ -123,8 +123,8 @@ export function createMockInnerHost(): CodexInnerIdeHostV1 {
 
   const interpreter: PythonInterpreter = {
     id: "mock-python",
-    executable: "/usr/bin/python3",
-    version: "Python 3.14",
+    executable: "demo-only",
+    version: "Python demo",
     source: "path"
   };
 
@@ -260,17 +260,13 @@ export function createMockInnerHost(): CodexInnerIdeHostV1 {
         const runId = randomId();
         queueMicrotask(() => {
           pythonListeners.forEach((listener) => listener({ runId, kind: "started" }));
-          const text = files.get(relativePath)?.includes("raise RuntimeError")
-            ? `Traceback (most recent call last):\n  File "${relativePath}", line 1\nRuntimeError: development preview\n`
-            : "Codex Inner IDE is ready\n";
-          pythonListeners.forEach((listener) => listener({ runId, kind: "output", stream: "stdout", text }));
+          const text = `Demo host did not execute ${relativePath}. Open IDE from the Companion App to use the real Python runtime.\n`;
+          pythonListeners.forEach((listener) => listener({ runId, kind: "output", stream: "stderr", text }));
           pythonListeners.forEach((listener) => listener({
             runId,
-            kind: "exited",
-            exitCode: text.includes("RuntimeError") ? 1 : 0,
-            diagnostics: text.includes("RuntimeError")
-              ? [{ relativePath, line: 1, column: 1, severity: "error", message: "RuntimeError: development preview" }]
-              : []
+            kind: "failed",
+            exitCode: 2,
+            diagnostics: []
           }));
         });
         return { runId };
@@ -294,19 +290,32 @@ export function createMockInnerHost(): CodexInnerIdeHostV1 {
             languageId: request.languageId,
             kind: "started"
           }));
-          const text = request.languageId === "json" ? "Valid JSON\n" : `Ran ${request.relativePath}\n`;
+          let text: string;
+          let exitCode = 0;
+          if (request.languageId === "json") {
+            try {
+              JSON.parse(files.get(request.relativePath) ?? "");
+              text = "Valid JSON\n";
+            } catch (reason) {
+              text = `${reason instanceof Error ? reason.message : "Invalid JSON"}\n`;
+              exitCode = 1;
+            }
+          } else {
+            text = `Demo host did not execute ${request.relativePath}. Open IDE from the Companion App to use the real ${request.languageId} runtime.\n`;
+            exitCode = 2;
+          }
           runtimeListeners.forEach((listener) => listener({
             runId,
             languageId: request.languageId,
             kind: "output",
-            stream: "stdout",
+            stream: exitCode === 0 ? "stdout" : "stderr",
             text
           }));
           runtimeListeners.forEach((listener) => listener({
             runId,
             languageId: request.languageId,
-            kind: "exited",
-            exitCode: 0,
+            kind: exitCode === 0 ? "exited" : "failed",
+            exitCode,
             diagnostics: []
           }));
         });

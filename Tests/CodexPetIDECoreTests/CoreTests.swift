@@ -379,6 +379,69 @@ final class ProtocolSafetyTests: XCTestCase {
 }
 
 final class AppServerIntegrationTests: XCTestCase {
+    func testPythonAndJavaScriptRuntimesExposeStdout() async throws {
+        let codexURL = URL(fileURLWithPath: "/Applications/ChatGPT.app/Contents/Resources/codex")
+        guard FileManager.default.isExecutableFile(atPath: codexURL.path) else {
+            throw XCTSkip("Bundled Codex App Server is unavailable")
+        }
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("CodexPetIDE-RuntimeOutput-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try Data("print('PYTHON_STDOUT_OK')\n".utf8)
+            .write(to: root.appendingPathComponent("main.py"))
+        try Data("console.log('JAVASCRIPT_STDOUT_OK');\n".utf8)
+            .write(to: root.appendingPathComponent("app.js"))
+
+        let workspace = try WorkspaceService(rootURL: root)
+        let client = AppServerClient(executableURL: codexURL, workingDirectoryURL: root)
+        let python = PythonService(client: client, workspace: workspace)
+        let runtime = RuntimeService(client: client, workspace: workspace)
+        let pythonEvents = AsyncStream.makeStream(of: PythonExecutionEvent.self)
+        let runtimeEvents = AsyncStream.makeStream(of: RuntimeExecutionEvent.self)
+        await python.setEventHandler { pythonEvents.continuation.yield($0) }
+        await runtime.setEventHandler { runtimeEvents.continuation.yield($0) }
+        try await python.start()
+        await runtime.start()
+        defer {
+            pythonEvents.continuation.finish()
+            runtimeEvents.continuation.finish()
+            Task {
+                await runtime.stop()
+                await python.stop()
+            }
+        }
+
+        guard let interpreter = await python.discover().first else {
+            throw XCTSkip("Python interpreter is unavailable")
+        }
+        let pythonRunID = try await python.run(
+            relativePath: "main.py",
+            interpreterID: interpreter.id
+        )
+        let pythonResult = try await waitForPythonRun(
+            pythonEvents.stream,
+            runID: pythonRunID
+        )
+        XCTAssertEqual(pythonResult.exitCode, 0)
+        XCTAssertEqual(pythonResult.output, "PYTHON_STDOUT_OK\n")
+
+        guard let node = await runtime.discover(languageID: "javascript").first(where: \.available) else {
+            throw XCTSkip("Node.js runtime is unavailable")
+        }
+        let javascriptRunID = try await runtime.execute(RuntimeExecuteRequest(
+            relativePath: "app.js",
+            languageId: "javascript",
+            runtimeId: node.id
+        ))
+        let javascriptResult = try await waitForRuntimeRun(
+            runtimeEvents.stream,
+            runID: javascriptRunID
+        )
+        XCTAssertEqual(javascriptResult.exitCode, 0)
+        XCTAssertEqual(javascriptResult.output, "JAVASCRIPT_STDOUT_OK\n")
+    }
+
     func testCommandExecEnforcesWorkspaceAndNetworkSandbox() async throws {
         let codexURL = URL(fileURLWithPath: "/Applications/ChatGPT.app/Contents/Resources/codex")
         guard FileManager.default.isExecutableFile(atPath: codexURL.path) else {
@@ -526,6 +589,56 @@ final class AppServerIntegrationTests: XCTestCase {
             ]),
             timeout: 20
         )
+    }
+
+    private func waitForPythonRun(
+        _ stream: AsyncStream<PythonExecutionEvent>,
+        runID: String
+    ) async throws -> (output: String, exitCode: Int) {
+        try await withThrowingTaskGroup(of: (String, Int).self) { group in
+            group.addTask {
+                var output = ""
+                for await event in stream where event.runId == runID {
+                    if event.kind == "output" { output += event.text ?? "" }
+                    if event.kind == "exited" || event.kind == "failed" {
+                        return (output, event.exitCode ?? -1)
+                    }
+                }
+                throw InnerIDEError.commandFailed("Python event stream ended before completion")
+            }
+            group.addTask {
+                try await Task.sleep(for: .seconds(30))
+                throw InnerIDEError.commandFailed("Python runtime output timed out")
+            }
+            let result = try await group.next()!
+            group.cancelAll()
+            return (result.0, result.1)
+        }
+    }
+
+    private func waitForRuntimeRun(
+        _ stream: AsyncStream<RuntimeExecutionEvent>,
+        runID: String
+    ) async throws -> (output: String, exitCode: Int) {
+        try await withThrowingTaskGroup(of: (String, Int).self) { group in
+            group.addTask {
+                var output = ""
+                for await event in stream where event.runId == runID {
+                    if event.kind == "output" { output += event.text ?? "" }
+                    if event.kind == "exited" || event.kind == "failed" {
+                        return (output, event.exitCode ?? -1)
+                    }
+                }
+                throw InnerIDEError.commandFailed("Runtime event stream ended before completion")
+            }
+            group.addTask {
+                try await Task.sleep(for: .seconds(30))
+                throw InnerIDEError.commandFailed("Runtime output timed out")
+            }
+            let result = try await group.next()!
+            group.cancelAll()
+            return (result.0, result.1)
+        }
     }
 }
 

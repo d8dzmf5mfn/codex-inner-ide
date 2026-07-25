@@ -63,6 +63,37 @@ final class RuntimeServiceTests: XCTestCase {
         XCTAssertEqual(diagnostics.first?.line, 3)
         XCTAssertEqual(diagnostics.first?.column, 7)
     }
+
+    func testRuntimeOutputReconcilerRestoresBufferedOutputWithoutDuplicatingStreamedText() {
+        XCTAssertEqual(
+            RuntimeOutputReconciler.unstreamedSuffix(
+                returned: "hello world\n",
+                streamed: ""
+            ),
+            "hello world\n"
+        )
+        XCTAssertEqual(
+            RuntimeOutputReconciler.unstreamedSuffix(
+                returned: "hello world\n",
+                streamed: "hello world\n"
+            ),
+            ""
+        )
+        XCTAssertEqual(
+            RuntimeOutputReconciler.unstreamedSuffix(
+                returned: "hello world\nsecond line\n",
+                streamed: "hello world\n"
+            ),
+            "second line\n"
+        )
+        XCTAssertEqual(
+            RuntimeOutputReconciler.unstreamedSuffix(
+                returned: "hello world\n",
+                streamed: "prefix\nhello world\n"
+            ),
+            ""
+        )
+    }
 }
 
 final class PreviewServiceTests: XCTestCase {

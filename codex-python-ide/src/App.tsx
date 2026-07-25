@@ -52,7 +52,7 @@ import type {
 
 type Conflict = { relativePath: string; disk: FileSnapshot };
 type ActiveSelection = { relativePath: string; range: SelectionRange; selectedText: string };
-type EditComposer = { scope: PythonEditScope; instruction: string };
+type EditComposer = { scope: Exclude<PythonEditScope, "auto">; instruction: string };
 type LoadedIde = {
   workspace: WorkspaceBinding;
   rootEntries: FileEntry[];
@@ -115,6 +115,7 @@ function InnerIde({ host }: { host: CodexInnerIdeHostV1 }) {
   });
   const [snippetsOpen, setSnippetsOpen] = useState(false);
   const documentsRef = useRef(documents);
+  const terminalEditProposalIds = useRef(new Set<string>());
   const theme = useTheme(globalPreferences.themeMode);
   const {
     running,
@@ -124,6 +125,7 @@ function InnerIde({ host }: { host: CodexInnerIdeHostV1 }) {
     execute,
     stop,
     check,
+    report,
     reset: resetRuntime
   } = useRuntimeExecution(host);
 
@@ -145,6 +147,7 @@ function InnerIde({ host }: { host: CodexInnerIdeHostV1 }) {
     setEditComposer(null);
     setProposal(null);
     setProposalMessage(null);
+    terminalEditProposalIds.current.clear();
     resetRuntime();
     host.window.setPinned(session.pinned);
   }, [host, resetRuntime]);
@@ -277,19 +280,32 @@ function InnerIde({ host }: { host: CodexInnerIdeHostV1 }) {
   useEffect(() => host.edits.subscribe((event) => {
     const { proposal: next, message: nextMessage } = event;
     if (next.state === "accepted" || next.state === "rejected") {
+      terminalEditProposalIds.current.add(next.proposalId);
       setProposal((current) => current?.proposalId === next.proposalId ? null : current);
       setProposalMessage(null);
+      setNotice(next.state === "accepted"
+        ? "Codex proposal applied to the editor buffer. Press ⌘S to save it to disk."
+        : nextMessage ?? "Codex proposal rejected.");
       return;
     }
     if (next.state === "failed") {
+      terminalEditProposalIds.current.add(next.proposalId);
       setProposal((current) => current?.proposalId === next.proposalId ? null : current);
       setProposalMessage(null);
       setError(nextMessage ?? "Codex did not return a valid edit proposal.");
       return;
     }
+    terminalEditProposalIds.current.delete(next.proposalId);
     setProposal(next);
     setProposalMessage(nextMessage ?? null);
-    if (next.state === "ready") setEditComposer(null);
+    if (next.state === "generating") {
+      setNotice("Codex is generating a read-only proposal…");
+    } else if (next.state === "ready") {
+      setEditComposer(null);
+      setNotice("Codex proposal is ready. Review it, then Accept or Reject.");
+    } else if (next.state === "stale") {
+      setNotice("The editor changed before the proposal was applied. Regenerate it.");
+    }
   }), [host]);
 
   const activeDocument = documents.find((document) => document.relativePath === activePath) ?? null;
@@ -471,6 +487,7 @@ function InnerIde({ host }: { host: CodexInnerIdeHostV1 }) {
     if (!await savePath(activeDocument.relativePath)) return;
     setError(null);
     if (action === "preview") {
+      setBottomPanelOpen(true);
       try {
         const value = await host.preview.open({
           relativePath: activeDocument.relativePath,
@@ -479,8 +496,17 @@ function InnerIde({ host }: { host: CodexInnerIdeHostV1 }) {
           htmlEntryRelativePath: preview?.entryRelativePath ?? null
         });
         setPreview(value);
+        report(
+          `Preview ready: ${activeDocument.relativePath}`
+          + (value.entryRelativePath && value.entryRelativePath !== activeDocument.relativePath
+            ? `\nHTML entry: ${value.entryRelativePath}`
+            : "")
+          + "\n"
+        );
       } catch (reason) {
-        setError(message(reason, `Unable to preview ${activeDocument.relativePath}`));
+        const detail = message(reason, `Unable to preview ${activeDocument.relativePath}`);
+        setError(detail);
+        report(`${detail}\n`, 1);
       }
       return;
     }
@@ -542,19 +568,40 @@ function InnerIde({ host }: { host: CodexInnerIdeHostV1 }) {
   };
 
   const submitEditRequest = async () => {
-    if (!editComposer) return;
+    if (!editComposer || !loaded || !activeDocument) return;
     const instruction = editComposer.instruction.trim();
     if (!instruction) {
       setError("Describe the Python change you want Codex to propose.");
       return;
     }
     setError(null);
-    setNotice(null);
+    setNotice("Starting Codex edit proposal…");
     setLastEditRequest({ ...editComposer, instruction });
     try {
-      await host.edits.request({ instruction, scope: editComposer.scope });
+      const requestedScope = editComposer.scope;
+      const started = await host.edits.request({ instruction, scope: requestedScope });
+      const baseBufferDigest = await digestText(activeDocument.content);
+      const pending: PythonEditProposal = {
+        proposalId: started.proposalId,
+        workspaceId: loaded.workspace.id,
+        relativePath: activeDocument.relativePath,
+        scope: requestedScope,
+        range: requestedScope === "selection"
+          && activeSelection?.relativePath === activeDocument.relativePath
+          ? activeSelection.range
+          : null,
+        baseBufferDigest,
+        summary: "Generating a read-only Codex proposal…",
+        replacementText: "",
+        state: "generating"
+      };
+      if (!terminalEditProposalIds.current.has(started.proposalId)) {
+        setProposal((current) => current?.proposalId === started.proposalId ? current : pending);
+        setProposalMessage((current) => current ?? "Waiting for Codex…");
+      }
       setEditComposer(null);
     } catch (reason) {
+      setNotice(null);
       setError(message(reason, "Unable to start the Codex edit proposal"));
     }
   };
@@ -577,12 +624,14 @@ function InnerIde({ host }: { host: CodexInnerIdeHostV1 }) {
     void host.edits.decide(proposalId, "rejected").catch((reason) => {
       setError(message(reason, "Unable to reject the proposal"));
     });
+    setNotice("Codex proposal rejected.");
   };
 
   const cancelProposal = (proposalId: string) => {
     void host.edits.cancel(proposalId).then(() => {
       setProposal((current) => current?.proposalId === proposalId ? null : current);
       setProposalMessage(null);
+      setNotice("Codex proposal cancelled.");
     }).catch((reason) => setError(message(reason, "Unable to cancel the proposal")));
   };
 

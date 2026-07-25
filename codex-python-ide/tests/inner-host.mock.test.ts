@@ -4,10 +4,12 @@ import { createMockInnerHost } from "../src/bridge/inner-host.mock";
 describe("development Inner IDE host", () => {
   it("is explicitly labelled as a demo host", async () => {
     const host = createMockInnerHost();
-    const [java] = await host.runtime.discover("java");
     expect(host.hostMode).toBe("mock");
-    expect(java.label).toBe("java demo");
-    expect(java.version).toBe("Demo host");
+    for (const languageId of ["python", "java", "javascript", "typescript"]) {
+      const [runtime] = await host.runtime.discover(languageId);
+      expect(runtime.label).toBe(`${languageId} demo`);
+      expect(runtime.version).toBe("Demo host");
+    }
   });
 
   it("enforces expectedDigest writes", async () => {
@@ -27,7 +29,7 @@ describe("development Inner IDE host", () => {
     })).rejects.toMatchObject({ name: "FileChangedError" });
   });
 
-  it("runs a Python file through the host contract", async () => {
+  it("does not pretend that the demo host executed Python", async () => {
     const host = createMockInnerHost();
     const [interpreter] = await host.python.discover();
     const events: string[] = [];
@@ -37,20 +39,35 @@ describe("development Inner IDE host", () => {
     const result = await host.python.run("main.py", interpreter.id);
     expect(result.runId).toBeTruthy();
     await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(events.join("")).toContain("Codex Inner IDE is ready");
+    expect(events.join("")).toContain("Demo host did not execute main.py");
   });
 
   it("exposes run, validate, and preview actions through the shared runtime contract", async () => {
     const host = createMockInnerHost();
-    const [java] = await host.runtime.discover("java");
-    const events: string[] = [];
+    const events: Array<{ languageId: string; text: string }> = [];
     host.runtime.subscribe((event) => {
-      if (event.text) events.push(event.text);
+      if (event.text) events.push({ languageId: event.languageId, text: event.text });
     });
 
-    await host.runtime.execute({ relativePath: "Main.java", languageId: "java", runtimeId: java.id });
+    for (const [languageId, relativePath] of [
+      ["python", "main.py"],
+      ["java", "Main.java"],
+      ["javascript", "app.js"],
+      ["typescript", "app.ts"]
+    ]) {
+      const [runtime] = await host.runtime.discover(languageId);
+      await host.runtime.execute({ relativePath, languageId, runtimeId: runtime.id });
+    }
     await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(events.join("")).toContain("Ran Main.java");
+    for (const [languageId, relativePath] of [
+      ["python", "main.py"],
+      ["java", "Main.java"],
+      ["javascript", "app.js"],
+      ["typescript", "app.ts"]
+    ]) {
+      expect(events.find((event) => event.languageId === languageId)?.text)
+        .toContain(`Demo host did not execute ${relativePath}`);
+    }
     await expect(host.runtime.check({
       relativePath: "data.json",
       languageId: "json",

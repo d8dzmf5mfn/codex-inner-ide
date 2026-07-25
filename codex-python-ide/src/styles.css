@@ -324,6 +324,17 @@ select:focus-visible {
   font-size: 11px;
 }
 
+.demo-host-badge {
+  padding: 2px 7px;
+  border: 1px solid color-mix(in srgb, #c47a25 55%, transparent);
+  border-radius: 999px;
+  color: #8a4c10;
+  background: color-mix(in srgb, #f4a340 13%, transparent);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
 .notice-error {
   border-color: #f0d0d0;
   background: #fff6f6;
@@ -1572,6 +1583,12 @@ select:focus-visible {
   border-color: #334d70;
   background: #202d40;
   color: #b8d4fa;
+}
+
+:root[data-theme="dark"] .demo-host-badge {
+  color: #ffc477;
+  border-color: color-mix(in srgb, #f4a340 65%, transparent);
+  background: color-mix(in srgb, #f4a340 17%, transparent);
 }
 
 :root[data-theme="dark"] .notice-error {

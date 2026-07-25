@@ -25,7 +25,7 @@ The preview does not include Side Chat, Review, an interactive terminal, Git UI,
 
 ## Download
 
-- The latest public preview is [`v0.4.3-preview`](https://github.com/d8dzmf5mfn/codex-inner-ide/releases/tag/v0.4.3-preview).
+- The latest public preview is [`v0.4.4-preview`](https://github.com/d8dzmf5mfn/codex-inner-ide/releases/tag/v0.4.4-preview).
 - The current build supports Apple Silicon Macs running macOS 14 or newer.
 - Download both the ZIP and `.sha256` file and verify the checksum before installing.
 
@@ -44,8 +44,8 @@ Requirements:
 Outputs:
 
 - Installed and launched app: `~/Applications/Codex Inner IDE.app`
-- Distribution archive: `dist/Codex.Inner.IDE-v0.4.3-preview-macos-arm64.zip`
-- Checksum file: `dist/Codex.Inner.IDE-v0.4.3-preview-macos-arm64.zip.sha256`
+- Distribution archive: `dist/Codex.Inner.IDE-v0.4.4-preview-macos-arm64.zip`
+- Checksum file: `dist/Codex.Inner.IDE-v0.4.4-preview-macos-arm64.zip.sha256`
 - Plugin archive: `dist/codex-inner-edit-v0.1.0.zip`
 
 Build the distribution archive without replacing the current installation:
@@ -99,6 +99,6 @@ Unknown versions can still open the IDE from the menu bar, but Sidepanel injecti
 
 ## Distribution Status
 
-- `v0.4.3-preview` is an Apple Silicon preview, not a notarized production release.
+- `v0.4.4-preview` is an Apple Silicon preview, not a notarized production release.
 - The current build machine has no usable Apple Developer ID, so the Release ZIP retains an ad-hoc signature.
 - See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for bundled third-party components and licenses.
